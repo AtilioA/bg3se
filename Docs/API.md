@@ -1,6 +1,7 @@
 # BG3SE Lua API v30 Documentation
 
 ## Table of Contents
+
 - [Getting Started](#getting-started)
   - [Bootstrap Scripts](#bootstrap-scripts)
 - [Client / Server States](#client-server)
@@ -56,11 +57,13 @@
 - [Engine Events](#engine-events)
 
 <a id="getting-started"></a>
+
 ## Getting Started
 
 To start using the extension in your mod, a configuration file must be created that describes what features are utilized by your mod.
 
 Create a file at `Mods\YourMod\ScriptExtender\Config.json` with the following contents, then tweak the values as desired:
+
 ```json
 {
     "RequiredVersion": 29,
@@ -83,10 +86,10 @@ The following features are accepted in `FeatureFlags`:
 |--|--|
 | `Lua` | Enables Lua scripting |
 
-
 <!-- | `Osiris` | Enables Osiris scripting? | -->
 
 <a id="bootstrap-scripts"></a>
+
 ### Bootstrap Scripts
 
 If Lua is enabled for the mod, the extender will attempt to load `BootstrapServer.lua` on the server side, and `BootstrapClient.lua` on the client side. These scripts should be created in the `Mods\<YOURMOD>\ScriptExtender\Lua\` folder.
@@ -96,22 +99,26 @@ The function checks if the file at `Mods/<ModuleUUID>/ScriptExtender/Lua/<path>`
 **Note:** `Ext.Require` should only be called during module startup (i.e. when loading `BootstrapClient.lua` or `BoostrapServer.lua`). Loading Lua files after module startup is deprecated.
 
 **Required Scripts**
+
 | Name | State |
 |--|--|
 | `BootstrapServer.lua` | Server Side |
 | `BootstrapClient.lua` | Client Side |
 
 From here, these scripts can load other scripts with `Ext.Require`. The path to scripts are relative to the Lua folder, so if you had a file setup like this:
+
 ```
 BootstrapClient.lua
 BootstrapServer.lua
 Server/SkillMechanics.lua
 ```
+
 BootstrapServer would load `SkillMechanics.lua` with `Ext.Require("Server/SkillMechanics.lua")`. Script loading only needs to happen once.
 
 See below for further information on the client/server states, as certain scripting functions are only available on a specific side (i.e. only Osiris functions work on the server-side, in unrestricted contexts).
 
 <a id="client-server"></a>
+
 ## Client / Server States
 
 Internally the game is split into two components, a client and a server component. When a new game is started/loaded, a new server is created and client connect to this server. The server component is only created on the host; client components are created on both the host and all peers. Because of this, the game technically always runs in multiplayer. Single player is just a special form of multiplayer where only one local peer is connected to the server.
@@ -119,11 +126,13 @@ Internally the game is split into two components, a client and a server componen
 Osiris and behavior scripts (gamescripts) always run on the server. Since Lua has access to features that require client-side code (UI modification, level scaling formulas, status chances, skill damage calculation, etc.) the extender keeps multiple Lua states: one state for the server and one for each client (including the single player "fake client"). These states are completely separated from each other and cannot access the internal state of each other (Lua globals, functions, variables).
 
 Because they run in different environments, server and client states can access a different set of features. Functions/classes in this document are annotated with the following letters, which indicate where they are available:
- - **C** - The function is only available on the client
- - **S** - The function is only available on the server
- - **R** - Restricted; the function is only callable in special contexts/locations
+
+- **C** - The function is only available on the client
+- **S** - The function is only available on the server
+- **R** - Restricted; the function is only callable in special contexts/locations
 
 <a id="console"></a>
+
 ## SE Console
 
 The extender allows commands to be entered to the console window.
@@ -137,12 +146,14 @@ Typing `exit` returns to log mode.
 
 Commands prefixed by a `!` will trigger callbacks registered via the `RegisterConsoleCommand` function.
 Example:
+
 ```lua
 local function testCmd(cmd, a1, a2, ...)
     _P("Cmd: " .. cmd .. ", args: ", a1, ", ", a2);
 end
 Ext.RegisterConsoleCommand("test", testCmd);
 ```
+
 The command `!test 123 456` will call `testCmd("test", 123, 456)` and prints `Cmd: test, args: 123, 456`.
 
 Anything else typed in the console will be executed as Lua code in the current context. (eg. typing `_P(1234)` will print `123`).
@@ -150,6 +161,7 @@ The console has full access to the underlying Lua state, i.e. server console com
 Variables can be used just like in Lua, i.e. variable in one command can later on be used in another console command. Be careful, console code runs in global context, so make sure console variable names don't conflict with globals (i.e. `Mods`, `Ext`, etc.)! Don't use `local` for console variables, since the lifetime of the local will be one console command. (Each console command is technically a separate chunk).
 
 <a id="multiline-mode"></a>
+
 ### Multiline mode
 
 One unique feature of the console is its multiline mode, which facilitates the input of multiple lines of code at once. To enter multiline mode, start your input with "--\[\[" followed by pressing the enter key. This signals the console to expect multiple lines of code. Once you've entered all your lines, close the multiline mode with "]]--".
@@ -166,6 +178,7 @@ end
 ```
 
 <a id="save-console-output"></a>
+
 ### Saving the console output to a file
 
 Sometimes, the output of a command in the console might be too lengthy or complex to analyze effectively within the console interface. In such cases, you might prefer to save the output to a file for easier review. This can be accomplished using a combination of two functions: `Ext.IO.SaveFile(filename, content)` and `Ext.DumpExport(object)`.
@@ -188,14 +201,17 @@ The saved file will be located in the Script Extender folder, typically found at
 This method provides a convenient way to store and analyze complex console output, allowing for easier debugging and analysis outside of the console environment.
 
 <a id="lua-general"></a>
+
 ## General SE Lua Rules
 
 <a id="lua-scopes"></a>
+
 ### Object Scopes
 
 Previously, a `userdata` (game object passed from the extender to Lua, i.e. `Character`, `Status`, etc.) returned from an API call or passed via a parameter was valid for an infinite duration. This meant that the object could be accessed anytime, potentially well after the actual object in the engine was destroyed, leading to strange crashes.
 
 Example of possible crash:
+
 ```lua
 local spells = Ext.Entity.Get(...).SpellBook.Spells
 
@@ -236,11 +252,12 @@ Subproperties inherit the lifetime of their parent object, eg. if you keep a ref
 
 This ensures that no potentially deleted objects are not accessed in risky contexts.
 
-
 <a id="lua-objects"></a>
+
 ### Object Behavior
 
 Attempting to read or write properties that don't exist on an object class now lead to a Lua error:
+
 ```lua
 local spellbook = Ext.Entity.Get(...).SpellBook
 -- Object of type 'SpellBookComponent' has no property named 'PreparedSpells'
@@ -248,6 +265,7 @@ _P(spellbook.PreparedSpells)
 ```
 
 The properties and methods of all engine objects can be read using iteration (metatables now support `__pairs`):
+
 ```lua
 local spell = Ext.Entity.Get(...).SpellBook.Spells[1]
 for property, value in pairs(spell) do
@@ -256,17 +274,20 @@ end
 ```
 
 Stringifying an engine object returns its class and instance ID (i.e. metatables now support `__tostring`):
+
 ```lua
 -- Prints "SpellBookEntry (00000209C32D16F0)"
 _P(tostring(Ext.Entity.Get(GetHostCharacter()).SpellBook.Spells[1]))
 ```
 
-Equality checks on engine objects return whether the two references point to the _same_ object:
+Equality checks on engine objects return whether the two references point to the *same* object:
+
 ```lua
 _P(Ext.Entity.Get(GetHostCharacter()) == Ext.Entity.Get(GetHostCharacter()))
 ```
 
 Array-like engine objects support iteration via `ipairs()` and their length can be read using the `#` operator (i.e. the `__len` and `__pairs` metamethods are now supported):
+
 ```lua
 local tags = _C().Tag.Tags
 _P("Number of tags: ", #tags)
@@ -276,16 +297,18 @@ end
 ```
 
 <a id="lua-parameters"></a>
+
 ### Parameter Passing
 
- - Numeric enum values and numeric bitmask values passed to API calls are validated; a Lua error is thrown if an unsupported enum label or bitfield value is passed.
+- Numeric enum values and numeric bitmask values passed to API calls are validated; a Lua error is thrown if an unsupported enum label or bitfield value is passed.
 
- - All bitmask parameters (eg. `PropertyContext`) support passing numeric values, strings and tables to specify the flags, i.e. the allowed ways to pass bitmasks are:
-    - Integer (i.e. `3` means "Target and AoE" for `PropertyContext`)
-    - String (i.e. `"Target"`) - note that this only supports passing a single value!
-    - Table (i.e. `{"Target", "AoE"}`)
+- All bitmask parameters (eg. `PropertyContext`) support passing numeric values, strings and tables to specify the flags, i.e. the allowed ways to pass bitmasks are:
+  - Integer (i.e. `3` means "Target and AoE" for `PropertyContext`)
+  - String (i.e. `"Target"`) - note that this only supports passing a single value!
+  - Table (i.e. `{"Target", "AoE"}`)
 
 <a id="lua-enumerations"></a>
+
 ### Enumerations
 
 Enum values returned from functions and enum properties are returned as `userdata` (lightcppobject) values instead of `string`.
@@ -295,6 +318,7 @@ _D(type(_C().CurrentTemplate.BloodSurfaceType)) -- "userdata"
 ```
 
 Enum values have `Label`, `Value` and `EnumName` properties that can be queried to fetch the textual name, numeric value and enumeration name respectively.
+
 ```lua
 local bt = _C().CurrentTemplate.BloodSurfaceType
 _D(bt.Label) -- "Blood"
@@ -347,6 +371,7 @@ print(Ext.Json.Stringify(Ext.Enums.SurfaceType.Web))
 ```
 
 <a id="lua-bitfields"></a>
+
 ### Bitfields
 
 Bitfields returned from functions and enum properties are `userdata` (lightcppobject) values instead of `table`.
@@ -356,6 +381,7 @@ _D(type(_C().Stats.AttributeFlags)) -- "userdata"
 ```
 
 Bitfields have `__Labels`, `__Value` and `__EnumName` properties that can be queried to fetch a table containing all textual names, a numeric value representing all values and the enumeration name respectively.
+
 ```lua
 local af = _C().Stats.AttributeFlags
 _D(af) -- ["SuffocatingImmunity", "BleedingImmunity", "DrunkImmunity"]
@@ -365,6 +391,7 @@ _D(af.__EnumName) -- "StatAttributeFlags"
 ```
 
 They also support querying the state of each bitfield flag (either by label or by numeric value):
+
 ```lua
 local af = _C().Stats.AttributeFlags
 _D(af.DrunkImmunity) -- true
@@ -372,6 +399,7 @@ _D(af.WebImmunity) -- false
 ```
 
 Bitfields support table-like iteration (i.e. `pairs`/`ipairs`):
+
 ```lua
 for k,v in pairs(af) do
    print(k,v)
@@ -399,7 +427,6 @@ _D(af & Ext.Enums.StatAttributeFlags.DrunkImmunity) -- ["DrunkImmunity"]
 _D(af | "FreezeImmunity") -- ["FreezeImmunity", "SuffocatingImmunity", "BleedingImmunity", "DrunkImmunity"]
 _D(af ~ 0x802) -- ["SuffocatingImmunity", "DrunkImmunity", "BurnImmunity"]
 ```
-
 
 Bitfields support comparison with other bitfields, singular bitfield labels, tables of bitfield labels and numeric values:
 
@@ -443,11 +470,13 @@ table.insert(af, "WebImmunity")
 ```
 
 <a id="lua-events"></a>
+
 ### SE Events
 
 Subscribing to engine events can be done through the `Ext.Events` table.
 
 Example:
+
 ```lua
 Ext.Events.GameStateChanged:Subscribe(function (e)
     _P("State change from " .. e.FromState .. " to " .. e.ToState)
@@ -455,6 +484,7 @@ end)
 ```
 
 The `Subscribe()` method accepts an optional options table that contains additional settings:
+
 ```lua
 Ext.Events.GameStateChanged:Subscribe(handler, {
     Priority = 50,
@@ -466,20 +496,25 @@ The `Priority` setting determines the order in which subscribers are called; sub
 If the `Once` flag is set, the event is only triggered once and the handler is automatically unsubscribed after the first call.
 
 The `Subscribe()` method returns a handler index that can be used to cancel the subscription later on:
+
 ```lua
 local handlerId = Ext.Events.GameStateChanged:Subscribe(handler)
 ...
 Ext.Events.GameStateChanged:Unsubscribe(handlerId)
 ```
+
 <a id="calling-osiris-from-lua"></a>
+
 ## Calling Osiris from Lua
 
 Lua server contexts have a special global table called `Osi` that contains every Osiris symbol. In addition, built-in engine functions (calls, queries, events) are also added to the global table.
 
 <a id="o2l_calls"></a>
+
 ### Osiris Calls
 
 Simply call the method from Lua with the same parameters:
+
 ```lua
 -- Built-in functions are in each mod's global table (_G). This will not work in the console!
 CharacterResetCooldowns(player)
@@ -490,16 +525,19 @@ Osi.CharacterResetCooldowns(player)
 <!-- Implementation detail: Technically, name resolution is only performed when the function is called, since Osiris allows multiple overloads of the same name and the function to call is resolved based on the number of arguments. Because of this, getting any key from the `Osi` table will return an object, even if no function with that name exists. Therefore, `Osi.Something ~= nil` and similar checks cannot be used to determine whether a given Osiris symbol exists. -->
 
 <a id="o2l_queries"></a>
+
 ### Osiris Queries
 
 The query behavior is a mirror of the one described in the [Exporting Lua functions to Osiris](#exporting-lua-functions-to-osiris) chapter.
 
 For queries with zero OUT arguments, the function will return a boolean indicating whether the query succeeded (true) or failed (false).
+
 ```lua
 local succeeded = SysIsCompleted("TestGoal")
 ```
 
 Queries with OUT arguments will have a number of return values corresponding to the number of OUT arguments.
+
 ```lua
 -- Single return value
 local player = GetHostCharacter()
@@ -508,14 +546,17 @@ local x, y, z = GetPosition(player)
 ```
 
 <a id="o2l_events"></a>
+
 ### Osiris Events
 
 Osiris events can be triggered by calling them like a function. Events are not buffered and the event is triggered synchronously, i.e. the function call returns when every Osiris rule that handles the event has finished.
+
 ```lua
 StoryEvent(player, "event name")
 ```
 
 <a id="o2l_procs"></a>
+
 ### PROCs
 
 Calling PROCs is equivalent to built-in calls, however they are not added to the global table.
@@ -525,6 +566,7 @@ Osi.Proc_CharacterFullRestore(player)
 ```
 
 <a id="o2l_qrys"></a>
+
 ### User Queries
 
 User queries (`QRY`) behave just like built-in queries do. Since they can't have OUT arguments (i.e. can't return values), the function will just return a boolean indicating whether the query succeeded or not. User queries are not added to the global table.
@@ -534,6 +576,7 @@ local succeeded = Osi.Qry_IsHealingStatus("DAMAGE")
 ```
 
 <a id="o2l_dbs"></a>
+
 ### Databases
 
 Databases can be read using the `Get` method. The method checks its parameters against the database and only returns rows that match the query.
@@ -541,6 +584,7 @@ Databases can be read using the `Get` method. The method checks its parameters a
 The number of parameters passed to `Get` must be equivalent to the number of columns in the target database. Each parameter defines an (optional) filter on the corresponding column; if the parameter is `nil`, the column is not filtered (equivalent to passing `_` in Osiris). If the parameter is not `nil`, only rows with matching values will be returned.
 
 Example:
+
 ```lua
 -- Fetch all rows from DB_GiveTemplateFromNpcToPlayerDialogEvent
 local rows = Osi.DB_GiveTemplateFromNpcToPlayerDialogEvent:Get(nil, nil, nil)
@@ -558,6 +602,7 @@ Osi.DB_CharacterAllCrimesDisabled(player)
 The `Delete` method can be used to delete rows from databases. The number of parameters passed to `Delete` must be equivalent to the number of columns in the target database.
 Each parameter defines an (optional) filter on the corresponding column; if the parameter is `nil`, the column is not filtered (equivalent to passing `_` in Osiris). If the parameter is not `nil`, only rows with matching values will be deleted.
 Example:
+
 ```lua
 -- Delete all rows from DB_GiveTemplateFromNpcToPlayerDialogEvent
 Osi.DB_GiveTemplateFromNpcToPlayerDialogEvent:Delete(nil, nil, nil)
@@ -567,25 +612,29 @@ Osi.DB_GiveTemplateFromNpcToPlayerDialogEvent:Delete("CON_Drink_Cup_A_Tea_080d0e
 ```
 
 <a id="calling-lua-from-osiris"></a>
+
 ## Calling Lua from Osiris
 
 <a id="l2o_captures"></a>
+
 ### Capturing Events/Calls
 
 The `Ext.Osiris.RegisterListener(name, arity, event, handler)` function registers a listener that is called in response to Osiris events.
 It currently supports capturing events, built-in queries, databases, user-defined PROCs and user-defined QRYs. Capture support for built-in calls will be added in a later version.
 
 Parameters:
- - `name` is the function or database name
- - `arity` is the number of columns for DBs or the number of parameters (both IN and OUT) for functions
- - `event` is the type of event to capture; possible values:
-   - `before` - Trigger event before a call/DB insert is performed
-   - `after` - Trigger event after a call/DB insert is performed
-   - `beforeDelete` - Trigger event before a DB delete is performed (databases only!)
-   - `afterDelete` - Trigger event after a DB delete is performed (databases only!)
- - `handler` is a Lua function that is called when the specified event is triggered. The function receives all parameters of the original DB/function.
+
+- `name` is the function or database name
+- `arity` is the number of columns for DBs or the number of parameters (both IN and OUT) for functions
+- `event` is the type of event to capture; possible values:
+  - `before` - Trigger event before a call/DB insert is performed
+  - `after` - Trigger event after a call/DB insert is performed
+  - `beforeDelete` - Trigger event before a DB delete is performed (databases only!)
+  - `afterDelete` - Trigger event after a DB delete is performed (databases only!)
+- `handler` is a Lua function that is called when the specified event is triggered. The function receives all parameters of the original DB/function.
 
 Example:
+
 ```lua
 Ext.Osiris.RegisterListener("TurnEnded", 1, "after", function (characterGuid)
     _P("TurnEnded- " .. characterGuid)
@@ -597,11 +646,13 @@ end)
 The Lua state and all local variables are reset after each game reload. To persist data across multiple play sessions, use ModVars, UserVars, or [MCMVars](https://wiki.bg3.community/Tutorials/Mod-Frameworks/mod-configuration-menu#mcm-api-functions). PersistentVars are deprecated and should not be used; prefer one of the aforementioned alternatives instead.
 
 <a id="user-variables"></a>
+
 ### User variables
 
 v10 adds support for attaching custom properties to entities. These properties support automatic network synchronization between server and clients as well as savegame persistence.
 
 To use custom variables, the variable name must first be registered with the variable manager:
+
 ```lua
 Ext.Vars.RegisterUserVariable("NRD_Whatever", {
     Server = true,
@@ -612,6 +663,7 @@ Ext.Vars.RegisterUserVariable("NRD_Whatever", {
 
 The `RegisterUserVariable` method accepts two parameters, a variable name and an optional list of settings.
 The following settings are supported:
+
 | Setting | Default | Meaning |
 |-|-|-|
 | `Server` | true | Variable is present on server entities |
@@ -626,25 +678,28 @@ The following settings are supported:
 | `DontCache` | false | Disable Lua caching of variable values (see below) |
 
 Usage notes:
- - Since variable prototypes are used for savegame serialization, network syncing, etc., they must be registered before the savegame is loaded and every time the Lua context is reset; performing the registration when `BootstrapServer.lua` or `BootstrapClient.lua` is loaded is recommended
- - Although the variables registered server-side and client-side can differ, it is recommended to register all variables on both sides (even if they're server-only or client-only) for consistency
- - Variable names, much like Osiris DB names are global; it is recommended to prefix them with your mod name to ensure they're unique
- - Variables must be registered with the same settings on both client and server, otherwise various synchronization issues may occur.
- - Client-only variables cannot be persistent.
 
+- Since variable prototypes are used for savegame serialization, network syncing, etc., they must be registered before the savegame is loaded and every time the Lua context is reset; performing the registration when `BootstrapServer.lua` or `BootstrapClient.lua` is loaded is recommended
+- Although the variables registered server-side and client-side can differ, it is recommended to register all variables on both sides (even if they're server-only or client-only) for consistency
+- Variable names, much like Osiris DB names are global; it is recommended to prefix them with your mod name to ensure they're unique
+- Variables must be registered with the same settings on both client and server, otherwise various synchronization issues may occur.
+- Client-only variables cannot be persistent.
 
 After registration, custom variables can be read/written through the `Vars` property on entities:
+
 ```lua
 _C().Vars.NRD_Whatever = 123
 Ext.Print(_C().Vars.NRD_Whatever)
 ```
 
 <a id="mod-variables"></a>
+
 ### Mod variables
 
 Mod variables are the equivalent of user variables for mods; i.e. they store and synchronize a set of variables for each mod. Mod variables are mostly functionally identical to user variables, so only the differences are highlighted here.
 
 To use a mod variable, the variable must first be registered with the variable manager:
+
 ```lua
 Ext.Vars.RegisterModVariable(ModuleUUID, "VariableName", {
     Server = true, Client = true, SyncToClient = true
@@ -654,6 +709,7 @@ Ext.Vars.RegisterModVariable(ModuleUUID, "VariableName", {
 Mod variable registrations are kept separate for each mod UUID, so there is no need to use unique prefixes for variables since a mod registering a variable in its own table will have no effect on other mods.
 
 The variables for a mod can be accessed by calling `Ext.Vars.GetModVariables(ModuleUUID)`:
+
 ```lua
 local vars = Ext.Vars.GetModVariables(ModuleUUID)
 Ext.Print(vars.VariableName)
@@ -665,20 +721,25 @@ vars.VariableName = 123
 ### Synchronization
 
 A variable is only eligible for synchronization if:
- - Both `Server` and `Client` flags are set
- - For server to client synchronization, both `WriteableOnServer` and `SyncToClient` flags are set
- - For client to server synchronization, both `WriteableOnClient` and `SyncToServer` flags are set
+
+- Both `Server` and `Client` flags are set
+- For server to client synchronization, both `WriteableOnServer` and `SyncToClient` flags are set
+- For client to server synchronization, both `WriteableOnClient` and `SyncToServer` flags are set
 
 For a variable to be synchronized, it must be *dirtied* first. The most straightforward way to perform this is by doing a direct write to the variable:
+
 ```lua
 _C().Vars.NRD_Whatever = "asd"
 ```
 
 Note: Writes to subproperties of complex types (i.e. tables etc) will not trigger this mechanism! Example:
+
 ```lua
 _C().Vars.NRD_Whatever.SomeProperty = 123
 ```
+
 Since the `__newindex` metamethod of the `Vars` object is not called, the variable manager does not detect that a change was performed. A simple fix is to reassign the property after modifications were made:
+
 ```lua
 local v = _C().Vars.NRD_Whatever
 v.SomeProperty = 123
@@ -688,15 +749,16 @@ _C().Vars.NRD_Whatever = v
 On each tick of the game loop, variables that were changed during the current tick are collected and sent to the client/server in a batch. Unless configured otherwise (i.e. the `SyncOnTick` setting is disabled), this is the default synchronization method.
 
 If a change to a user variable must be visible by the peer before the end of the current tick:
- - The `SyncOnWrite` flag can be enabled which ensures that the write is immediately sent to client/server without additional wait time.
- - `Ext.Vars.SyncUserVariables()` can be called, which synchronizes all user variable changes that were done up to that point
 
+- The `SyncOnWrite` flag can be enabled which ensures that the write is immediately sent to client/server without additional wait time.
+- `Ext.Vars.SyncUserVariables()` can be called, which synchronizes all user variable changes that were done up to that point
 
 ### Caching behavior
 
 The variable manager keeps a Lua copy of table variables for performance reasons. This means that instead of unserializing the table from JSON each time the property is accessed, the cached Lua version is returned after the first access. This means that subsequent accesses to the property will return the same reference and writes to the property.
 
 Example:
+
 ```lua
 local t1 = _C().Vars.NRD_Whatever
 local t2 = _C().Vars.NRD_Whatever
@@ -705,6 +767,7 @@ _D(t2.Name) -- prints "test"
 ```
 
 Cached variables are serialized to JSON when they are first sent to the client/server or when a savegame is created. This means that all changes to a dirtied variable up to the next synchronization point will be visible to peers despite no explicit write being performed to `Vars`. Example:
+
 ```lua
 local v = _C().Vars.NRD_Whatever
 v.SomeProperty = 123
@@ -745,7 +808,6 @@ t1.Name = "t1"
 _D(_C().Vars.NRD_Whatever.Name) -- prints "t1"
 ```
 
-
 <details>
 <summary><b>Deprecated: PersistentVars</b></summary>
 
@@ -756,6 +818,7 @@ PersistentVars store in the mod-local table `Mods[ModTable].PersistentVars`. By 
 (Note: There is no global `PersistentVars` table, i.e. mods that haven't set their `ModTable` won't be able to use this feature).
 
 Example:
+
 ```lua
 PersistentVars = {}
 ...
@@ -771,6 +834,7 @@ end
 
 Ext.Events.SessionLoaded:Subscribe(OnSessionLoaded)
 ```
+
 <a id="persistent-vars"></a>
 </details>
 
@@ -783,24 +847,27 @@ Ext.Events.SessionLoaded:Subscribe(OnSessionLoaded)
 > Please refer to the [ExtIdeHelpers](https://github.com/Norbyte/bg3se/blob/main/BG3Extender/IdeHelpers/ExtIdeHelpers.lua) for a more comprehensive and systematic definition/reference of the API.
 
 ## ECS
+
 Entity and component APIs are available on both client and server.
 
 <a id="entity-class"></a>
+
 ## Entity class - `Ext.Entity`
 
 Game objects in BG3 are called entities. Each entity consists of multiple components that describes certain properties or behaviors of the entity.
-The Lua `Entity` class is the represntation of an ingame object (eg. character, item, trigger, etc.).
+The Lua `Entity` class is the representation of an ingame object (eg. character, item, trigger, etc.).
 
 *Technical note:* For a somewhat more detailed description of the ECS system see:
- - [Entities, components and systems](https://medium.com/ingeniouslysimple/entities-components-and-systems-89c31464240d)
- - [The Entity-Component-System - An awesome game-design pattern in C++ ](https://www.gamasutra.com/blogs/TobiasStein/20171122/310172/The_EntityComponentSystem__An_awesome_gamedesign_pattern_in_C_Part_1.php)
 
+- [Entities, components and systems](https://medium.com/ingeniouslysimple/entities-components-and-systems-89c31464240d)
+- [The Entity-Component-System - An awesome game-design pattern in C++](https://www.gamasutra.com/blogs/TobiasStein/20171122/310172/The_EntityComponentSystem__An_awesome_gamedesign_pattern_in_C_Part_1.php)
 
 ### Entity:GetAllComponentNames() : string[]
 
 Returns all engine component types (native C++ class names) that the entity has.
 
 Example:
+
 ```lua
 local char = Ext.Entity.Get(GetHostCharacter())
 _D(char:GetAllComponentNames())
@@ -812,7 +879,6 @@ _D(char:GetAllComponentNames())
 -- ...
 ```
 
-
 ### Entity:GetAllComponents() : Component[]
 
 Returns all components that are attached to the entity.
@@ -820,6 +886,7 @@ Returns all components that are attached to the entity.
 *Note:* This method only returns components whose structure is known to the Script Extender. Components with unknown structure are not returned.
 
 Example:
+
 ```lua
 local entity = Ext.Entity.Get(GetHostCharacter())
 _D(entity:GetAllComponents())
@@ -832,7 +899,6 @@ _D(entity:GetAllComponents())
 -- ...
 ```
 
-
 ### Entity:GetComponent(name) : Component?
 
 Returns the specified component if it is attached to the entity. If the component is not present the method returns `nil`.
@@ -843,6 +909,7 @@ Returns the specified component if it is attached to the entity. If the componen
 Eg. to check if the entity is a character, an `entity:GetComponent("ServerCharacter") ~= nil` check can be used.
 
 Example:
+
 ```lua
 local entity = Ext.Entity.Get(GetHostCharacter())
 _D(entity:GetComponent("DisplayName"))
@@ -855,6 +922,7 @@ _D(entity:GetComponent("DisplayName"))
 ```
 
 The `__index` metamethod of the Entity object is a shorthand for `GetComponent`:
+
 ```lua
 local entity = Ext.Entity.Get(GetHostCharacter())
 -- The two below are equivalent
@@ -862,13 +930,11 @@ local displayName = entity:GetComponent("DisplayName")
 local displayName = entity.DisplayName
 ```
 
-
 ### Entity:CreateComponent(name) : Component
 
 Attaches a new empty copy of the specified component type to the entity, if one does not exist. The function returns the newly created component.
 
 *Note:* This method only works for components whose structure is known to the Script Extender. Components with unknown structure are not returned.
-
 
 ### Entity:Replicate(component)
 
@@ -889,14 +955,30 @@ This allows you to react to changes in the entities and execute code based on th
 
 *Note:* normal subscriptions fire immediately. 'Deferred' variants fire at the end of the tick.
 
+#### Listening to One-Frame components
+
+The engine often surfaces transient, instantaneous events as **One-Frame Components**. These components are attached to an entity for exactly one tick of the game loop before being destroyed.
+
+Some examples include:
+
+- `SpellCastFinishedEvent`
+- `HitNotificationEvent`
+- `ActionResourceSpendEvent`
+
+To catch a One-Frame component, you must hook into **`Ext.Entity.OnCreate`** on server side. This fires the exact moment the component is instantiated and attached to an entity.
+
+Because One-Frame components exist for only a single frame on the server, they are *never replicated to the client*. Attempting to use `Subscribe` on them will throw an error.
+
+You can discover several `OneFrameComponent` components in the [ExtIdeHelpers](https://github.com/Norbyte/bg3se/blob/main/BG3Extender/IdeHelpers/ExtIdeHelpers.lua).
+
 ### Ext.Entity.Subscribe(componentName, callback, [entity], [order])
 
 Generic component-change subscription.
 
- - `componentName`: component type (`ExtComponentType`)
- - `callback`: function called on matching changes
- - `entity` (optional): restrict to one entity
- - `order` (optional): ordering key for subscription processing
+- `componentName`: component type (`ExtComponentType`)
+- `callback`: function called on matching changes
+- `entity` (optional): restrict to one entity
+- `order` (optional): ordering key for subscription processing
 
 Returns a subscription id (`uint64`) that can be passed to `Unsubscribe`.
 
@@ -990,14 +1072,16 @@ Returns the entity index of the entity handle.
 (For development purposes only.)
 
 <a id="helper-functions"></a>
+
 ### Helper/aliased functions
 
 Some helper functions were added to aid in development. (Please note that using them in mod code is not recommended, they are designed for developer use only.)
 
 Prints the specified value(s) to the debug console. Works similarly to the built-in Lua `print()`, except that it also logs the printed messages to the editor messages pane.
- - `_D()`: Equivalent to `Ext.Dump()`, an utility function for dumping an expression to console; supports hierarchical dumping of tables and userdata (engine) objects
- - `_P()`: Equivalent to `Ext.Utils.Print()`
- - `_C()`: Equivalent to `Ext.Entity.Get(Osi.GetHostCharacter())`
+
+- `_D()`: Equivalent to `Ext.Dump()`, an utility function for dumping an expression to console; supports hierarchical dumping of tables and userdata (engine) objects
+- `_P()`: Equivalent to `Ext.Utils.Print()`
+- `_C()`: Equivalent to `Ext.Entity.Get(Osi.GetHostCharacter())`
 
 ## Networking
 
@@ -1006,6 +1090,7 @@ Mods can exchange data between the server and client(s) using the NetChannel API
 Note that there is no external networking capability in the Script Extender. SE mods cannot communicate with external servers or clients.
 
 <a id="net-channel-api"></a>
+
 ### NetChannel API
 
 > This section documents the new **NetChannel API**, which supersedes the legacy/deprecated NetMessage approach.
@@ -1020,14 +1105,13 @@ NetChannel improves ergonomics and safety compared to the deprecated NetMessage 
 - **Handler attachment per-channel** - handlers are registered per channel and are explicit; there are no loose handlers floating around subscriptions.
 - **Faster local client requests** - old NetMessages were delayed by 1 frame even if the target was the local client (e.g. in single-player).
 
-
 #### Quick concepts
 
-* **Channel**: a named communication channel (string identifier).
-* **Request / reply**: send a request and receive a response via a callback.
-* **Message**: a one-way transmission of payload data to the other context (fire-and-forget).
-* **Handlers** assign a *message handler* or *request handler* to a channel; these run when a message/request arrives.
-* **Request callbacks** when you `RequestTo*`, you can pass a callback to receive the reply asynchronously.
+- **Channel**: a named communication channel (string identifier).
+- **Request / reply**: send a request and receive a response via a callback.
+- **Message**: a one-way transmission of payload data to the other context (fire-and-forget).
+- **Handlers** assign a *message handler* or *request handler* to a channel; these run when a message/request arrives.
+- **Request callbacks** when you `RequestTo*`, you can pass a callback to receive the reply asynchronously.
 
 ---
 
@@ -1055,6 +1139,7 @@ function NetChannel:RequestToClient(data, user, replyCallback) end
 ```
 
 <a id="net-channel-examples"></a>
+
 #### Usage patterns and examples
 
 This section provides some pseudo-code examples of how to use the NetChannel API under different scenarios.
@@ -1136,7 +1221,6 @@ Channels.ChangeAppearance:SendToClient({ CCAData = {...} }, clientId)
 
 Only the client of id `clientId` will receive the message.
 
-
 <details>
 <summary><b>Deprecated: NetMessages API</b></summary>
 
@@ -1147,9 +1231,11 @@ To exchange data between the server and client(s), we use NetMessages. These can
 <a id="net-send"></a>
 
 ### Sending NetMessages
+
 NetMessages can be sent from either the server or client. They consist of a channel and a payload. The channel is a string used to distinguish your messages from others, and the payload is the data being sent. Currently, the payload must be a string. Here are some examples:
 
 **Sending data from the server to the client(s) :**
+
 ```lua
 --Server context
 local channel = "MyModChannel_SomethingSpecific"
@@ -1172,6 +1258,7 @@ Ext.ServerNet.PostMessageToClient(characterUUID, channel, payload)
 ```
 
 **Sending data from the client to the server :**
+
 ```lua
 local channel = "MyModChannel_SomethingSpecific"
 local payload = "I'm a cute message"
@@ -1179,9 +1266,8 @@ local payload = "I'm a cute message"
 Ext.ClientNet.PostMessageToServer(channel, payload)
 ```
 
-
-
 <a id="net-receive"></a>
+
 ### Listening for NetMessages
 
 To handle incoming messages, we can listen to a channel on either side and use the received data. If the payload was stringified, use `Ext.Json.Parse` to convert it back into a table; otherwise, it remains a string.
@@ -1202,6 +1288,7 @@ end)
 ```
 
 **Alternatively :**
+
 ```lua
 --wrapper for Ext.Events.NetMessage:Subscribe(function(data) ...end)
 --which removes the need to check for the channel
@@ -1231,9 +1318,11 @@ Ext.Events.NetMessage:Subscribe(function(data)
  end
 end)
 ```
+
 </details>
 
 ### Utility functions
+
 <a id="net-utils"></a>
 
 #### Ext.Net.IsHost()
@@ -1241,9 +1330,11 @@ end)
 Returns true if the client it was called from is the host, always return true from the server context.
 
 <a id="noesis-ui"></a>
+
 ## Noesis UI - `Ext.UI`
 
 <a id="noesis-viewmodels"></a>
+
 ### Custom ViewModels
 
 SE supports the creation and modification of Noesis viewmodels. These objects can be bound to UI elements as a DataContext and can participate in data binding.
@@ -1254,10 +1345,10 @@ For details on how Noesis (WPF) data bindings work see: [docs](https://learn.mic
 
 To create a new viewmodel, the structure of the viewmodel must be first registered with Noesis. This only needs to be done once (typically during script bootstrapping) and the type can be instantiated any number of times afterwards. Once registered, a type cannot be changed.
 
-
 To register a type, call the `Ext.UI.RegisterType(typeName, {property1 = {...}, property2 = {...}, ...}, [wrappedTypeName])` function.
 
 Example:
+
 ```lua
 local changeCallback = function (context, value)
     print("Value changed: ", value)
@@ -1302,21 +1393,23 @@ The third (optional) parameter contains the type name of the viewmodel your type
 The `Ext.UI.Instantiate(type, [wrappedViewModel])` call constructs a new instance of the specified type.
 
 For types without a wrapped viewmodel the second parameter should be omitted:
+
 ```lua
 local vm = Ext.UI.Instantiate("PREFIX_YourTypeName")
 vm.MyStringProperty = "whatever"
 ```
 
 For types that wrap an existing DataContext, the wrapped object should be passed in the second parameter when constructing; the new object can be used to replace the existing DataContext on the widget:
+
 ```lua
 local vm = Ext.UI.Instantiate("se::PREFIX_YourTypeName", mainMenu.DataContext)
 mainMenu.DataContext = vm
 ```
 
-
 #### Example
 
 Example for replacing the main menu start game action:
+
 ```lua
 -- Register a wrapper type for the main menu DataContext
 Ext.UI.RegisterType("SAMPLE_MainMenuCtx", {
@@ -1345,9 +1438,10 @@ UI is inherently client-side, therefore these APIs are client-side only.
 Returns the picking helper for `playerId`. Useful for point-and-click logic and world cursor targeting.
 
 Some useful fields:
- - `Selection`: currently selected in-range entity under cursor;
- - `Inner.WorldPosition`: world-space hit position;
- - `WindowCursorPos`: cursor position in window coordinates;
+
+- `Selection`: currently selected in-range entity under cursor;
+- `Inner.WorldPosition`: world-space hit position;
+- `WindowCursorPos`: cursor position in window coordinates;
 
 #### Ext.UI.GetCursorControl(): EclCursorControl
 
@@ -1358,25 +1452,27 @@ TODO:
 Returns drag-and-drop state for `playerId`.
 
 Some useful fields:
- - `IsDragging`;
- - `ScreenPosition`;
+
+- `IsDragging`;
+- `ScreenPosition`;
 
 <a id="stats"></a>
+
 ## Stats - `Ext.Stats`
 
 <a id="stats-GetStatEntries"></a>
+
 ### Ext.Stats.GetStats(type: string): string[]
 
 Returns a table with the names of all stat entries.
 When the optional parameter `type` is specified, it'll only return stats with the specified type.
 The following types are supported: `StatusData`, `SpellData`, `PassiveData`, `Armor`,  `Weapon`, `Character`, `Object`, `SpellSet`, `EquipmentSet`, `TreasureTable`, `TreasureCategory`,  `ItemGroup`, `NameGroup`
 
-
 <a id="stats-objects"></a>
+
 ### Stats Objects
 
 The following functions are only usable for Spell, Status, Passive, Interrupt, Armor, Weapon, Character and Object stats entries. Other stats types (eg. ItemGroups, TreasureTables) have their own separate sections in the docs and cannot be manipulated using these functions.
-
 
 #### Ext.Stats.GetStatsLoadedBefore(modGuid: string, type: string): string[]
 
@@ -1390,12 +1486,13 @@ Creates a new stats entry.
 If a stat object with the same name already exists, the specified modifier type is invalid or the specified template doesn't exist, the function returns `nil`.
 After all stat properties were initialized, the stats entry must be synchronized by calling `stat:Sync()`.
 
- - `name` is the name of stats entry to create; it should be globally unique
- - `type` is the stats entry type (eg. `SkillData`, `StatusData`, `Weapon`, etc.)
- - If the `template` parameter is not null, stats properties are copied from the template entry to the newly created entry
- - If the entry was created on the server, `stat:Sync()` will replicate the stats entry to all clients. If the entry was created on the client, `stat:Sync()` will only update it locally.
+- `name` is the name of stats entry to create; it should be globally unique
+- `type` is the stats entry type (eg. `SkillData`, `StatusData`, `Weapon`, etc.)
+- If the `template` parameter is not null, stats properties are copied from the template entry to the newly created entry
+- If the entry was created on the server, `stat:Sync()` will replicate the stats entry to all clients. If the entry was created on the client, `stat:Sync()` will only update it locally.
 
 Example:
+
 ```lua
 local stat = Ext.Stats.Create("NRD_Dynamic_Skill", "SkillData", "Rain_Water")
 stat.RainEffect = "RS3_FX_Environment_Rain_Fire_01"
@@ -1412,6 +1509,7 @@ If the `level` argument is not `nil`, the table will contain level-scaled values
 The behavior of getting a table entry is identical to that of `StatGetAttribute` and setting a table entry is identical to `StatSetAttribute`.
 
 The `StatSetAttribute` example rewritten using `Stats.Get`:
+
 ```lua
 -- Swap DamageType from Poison to Air on all skills
 for i,name in pairs(Ext.Stats.GetStats("SkillData")) do
@@ -1423,6 +1521,7 @@ end
 ```
 
 <a id="reading-writing-stats"></a>
+
 #### Reading stat attributes
 
 Stat attributes can be retrieved by reading the appropriate property of the StatEntry object:
@@ -1451,8 +1550,8 @@ If the function is called while the module is loading (i.e. from a `ModuleLoadin
 
 *Technical note:* The StatEntry object has a `__newindex` metamethod that performs validation and updates the real stats entry in the background.
 
-
 Example usage of stats read/write (Disable autocast on all spells):
+
 ```lua
 for i,name in pairs(Ext.Stats.GetStats("SpellData")) do
     local spell = Ext.Stats.Get(name)
@@ -1463,6 +1562,7 @@ end
 ```
 
 **Note:** When modifying stat attributes that are tables (i.e. `Requirements`, `SpellSuccess`, `SpellProperties` etc.) it is not sufficient to just modify the table, the modified table must be reassigned to the stat property:
+
 ```lua
 local requirements = spell.Requirements
 table.insert(requirements, {Name = "Immobile", Param = -1, Not = false})
@@ -1479,6 +1579,7 @@ For a list of enumeration types and their possible values see `Public\Shared\Sta
 The `AttributeFlags`, `SpellFlagList`, `WeaponFlags`, `ResistanceFlags`, `PassiveFlags`, `ProficiencyGroupFlags`, `StatsFunctorContext`, `StatusEvent`, `StatusPropertyFlags`, `StatusGroupFlags` and `LineOfSightFlags` enumerations are flags; this means that multiple enumeration values may be assigned to a stats property.
 
 Reading flags:
+
 ```lua
 local spell = Ext.Stats.Get("Shout_ArmorOfAgathys")
 _D(spell.SpellFlags)
@@ -1487,6 +1588,7 @@ _D(spell.SpellFlags)
 ```
 
 Writing flags:
+
 ```lua
 local spell = Ext.Stats.Get("Shout_ArmorOfAgathys")
 spell.SpellFlags = {"HasVerbalComponent", "IsSpell"}
@@ -1495,6 +1597,7 @@ spell.SpellFlags = {"HasVerbalComponent", "IsSpell"}
 ##### Requirements
 
 `Requirements` and `MemorizationRequirements` are returned in the following format:
+
 ```js
 [
     {
@@ -1521,11 +1624,13 @@ spell.SpellFlags = {"HasVerbalComponent", "IsSpell"}
 *Note*: It is possible to add custom `ExtraData` keys by adding a new `Data.txt` to the mod and then retrieve them using Lua.
 
 Example:
+
 ```lua
 Ext.Utils.Print(Ext.Stats.ExtraData.WisdomTierHigh)
 ```
 
 <a id="io"></a>
+
 ## I/O - `Ext.IO`
 
 Server and client filesystem helpers.
@@ -1544,11 +1649,13 @@ Server and client filesystem helpers.
 `AddPathOverride` should be called as early as possible (typically `ModuleLoadStarted`), before the original resource is loaded.
 
 Example:
+
 ```lua
 Ext.IO.AddPathOverride("Public/Game/GUI/enemyHealthBar.swf", "Public/YourMod/GUI/enemyHealthBar.swf")
 ```
 
 <a id="timers"></a>
+
 ## Timers - `Ext.Timer`
 
 Timer and clock helpers.
@@ -1556,18 +1663,22 @@ Timer and clock helpers.
 ### Delayed execution
 
 #### `Ext.Timer.WaitFor(ms, callback)`
+
 Uses game clock (pauses when game pauses).
 
 #### `Ext.Timer.WaitForRealtime(ms, callback)`
+
 Uses OS clock.
 
 Most of the time they are the same, but there are cases when the game timer is paused and time doesn't "progress".
 Game timer can also be affected by the tick throttling logic if the framerate drops too low.
 
 #### `Ext.Timer.WaitForPersistent(ms, name, callback)`
+
 Creates a persistent handle that is written to the savegame so your timer survives a save/reload.
 
 #### `Ext.Timer.MonotonicTime()`
+
 Returns a monotonic value representing the current system time in milliseconds. Useful for performance measurements / measuring real world time.
 (Note: This value is not synchronized between peers and different clients may report different time values!)
 
@@ -1590,6 +1701,7 @@ Returns a monotonic value representing the current system time in milliseconds. 
 `Ext.Timer.MonotonicTime()` returns monotonic system time (ms). Decent for profiling. It is not synchronized between peers.
 
 Example:
+
 ```lua
 local startTime = Ext.Timer.MonotonicTime()
 DoLongTask()
@@ -1598,6 +1710,7 @@ _P("Took: " .. tostring(endTime - startTime) .. " ms")
 ```
 
 <a id="json-support"></a>
+
 ## JSON support - `Ext.Json`
 
 Two functions are provided for parsing and building JSON documents, `Ext.Json.Parse` and `Ext.Json.Stringify`.
@@ -1619,6 +1732,7 @@ It is not possible to stringify/parse `lightuserdata`, `userdata`, `function` an
 Since JSON only supports string object keys, Lua `number` (integer/float) keys are saved as `string`.
 
 Usage example:
+
 ```lua
 local tab = {
     asd = 1234,
@@ -1635,6 +1749,7 @@ _P(decoded.arr[1])
 ```
 
 Expected output:
+
 ```
 {
     "arr": [
@@ -1648,15 +1763,16 @@ Expected output:
 ab
 ```
 
- - The `Stringify` function accepts an optional settings table `Stringify(value, [options])`. `options` is a table that supports the following keys:
-   - `Beautify` (bool) - Generate human-readable JSON (i.e. add indents and linebreaks to the output)
-   - `StringifyInternalTypes` (bool) - Save engine types (handles, coroutines, etc.) as strings instead of throwing an error
-   - `IterateUserdata` (bool) - Dump engine objects similarly to tables instead of throwing an error
-      - NOTE: Due to the nature of these objects, neither internal types nor userdata types can be unserialized from a JSON; parsing a JSON with userdata objects will return them as normal tables
-    - `AvoidRecursion` (bool) - If an userdata or table is seen multiple times, further instances will be serialized as `"*RECURSION*"`; this is helpful when dumping objects
-    - `MaxDepth` (int) - Maximum iteration depth
+- The `Stringify` function accepts an optional settings table `Stringify(value, [options])`. `options` is a table that supports the following keys:
+  - `Beautify` (bool) - Generate human-readable JSON (i.e. add indents and linebreaks to the output)
+  - `StringifyInternalTypes` (bool) - Save engine types (handles, coroutines, etc.) as strings instead of throwing an error
+  - `IterateUserdata` (bool) - Dump engine objects similarly to tables instead of throwing an error
+    - NOTE: Due to the nature of these objects, neither internal types nor userdata types can be unserialized from a JSON; parsing a JSON with userdata objects will return them as normal tables
+  - `AvoidRecursion` (bool) - If an userdata or table is seen multiple times, further instances will be serialized as `"*RECURSION*"`; this is helpful when dumping objects
+  - `MaxDepth` (int) - Maximum iteration depth
 
 Example:
+
 ```lua
 Ext.Json.Stringify(val, {
     Beautify = true,
@@ -1665,6 +1781,7 @@ Ext.Json.Stringify(val, {
 ```
 
 <a id="mod-info"></a>
+
 ## Mod info - `Ext.Mod`
 
 ### IsModLoaded(modGuid)
@@ -1672,6 +1789,7 @@ Ext.Json.Stringify(val, {
 Returns whether the module with the specified GUID is loaded.
 
 Example:
+
 ```lua
 if (Ext.Mod.IsModLoaded("5cc23efe-f451-c414-117d-b68fbc53d32d"))
     _P("Mod loaded")
@@ -1691,6 +1809,7 @@ TODO.
 Returns detailed information about the specified loaded module.
 
 Returned object type is `Module`:
+
 - `Info: ModuleInfo`
 - `Dependencies: ModuleShortDesc[]`
 - `Addons: ModuleShortDesc[]`
@@ -1699,6 +1818,7 @@ Returned object type is `Module`:
 `ModuleInfo` includes fields such as `Name`, `Author`, `Description`, `Directory`, `ModuleUUID`, and `ModVersion`.
 
 Example:
+
 ```lua
 local loadOrder = Ext.Mod.GetLoadOrder()
 for k,uuid in pairs(loadOrder) do
@@ -1712,12 +1832,14 @@ end
 Provides access to the engine's internal ModManager. Useful to get information about load order, dependencies, conflicts, etc.
 
 `ModManager` commonly used fields:
+
 - `AvailableMods: Module[]`
 - `LoadOrderedModules: Module[]`
 - `BaseModule: Module`
 - `Settings: ModuleSettings`
 
 <a id="utils"></a>
+
 ## Utils - `Ext.Utils`
 
 General utility helpers.
@@ -1729,6 +1851,7 @@ General utility helpers.
 - `Ext.Utils.GetGameState()` - current game state enum.
 - `Ext.Utils.GetGlobalSwitches(): GlobalSwitches` - exposes a large settings object (`GlobalSwitches`) including fields like `AiEnableSwarm`, `CanAutoSave`, `NrOfAutoSaves`, etc.
 - `Ext.Utils.GetCommandLineParams(): string[]` - CLI arguments used to launch the game, e.g.:
+
 ```[
     "\"..\\bin\\bg3_dx11.exe\"",
     "--skip-launcher",
@@ -1740,13 +1863,14 @@ General utility helpers.
     "1"
 ]
 ```
+
 - `Ext.Utils.HandleToInteger(handle): int64`
 - `Ext.Utils.IntegerToHandle(value): EntityHandle`
 - `Ext.Utils.IsValidHandle(handle): boolean`
 - `Ext.Utils.ProfileBegin(name)` / `Ext.Utils.ProfileEnd()`
 
-
 <a id="audio"></a>
+
 ## Audio - `Ext.Audio`
 
 Client-side audio control API (banks, events, RTPC, switches, states).
@@ -1771,6 +1895,7 @@ Client-side audio control API (banks, events, RTPC, switches, states).
 - `Ext.Audio.ResumeAllSounds()`
 
 <a id="loca"></a>
+
 ## Localization - `Ext.Loca`
 
 Methods for reading and writing localization entries (loca) at runtime.
@@ -1783,12 +1908,14 @@ Methods for reading and writing localization entries (loca) at runtime.
   Updates/overrides translated text for a handle at runtime.
 
 Example:
+
 ```lua
 local text = Ext.Loca.GetTranslatedString("h1234567890abcdef1234567890abcdefg")
 Ext.Loca.UpdateTranslatedString("h1234567890abcdef1234567890abcdefg", text .. " (modified)")
 ```
 
 <a id="templates"></a>
+
 ## Templates - `Ext.Template`
 
 Template lookup API (e.g. character/item root templates).
@@ -1809,6 +1936,7 @@ Template lookup API (e.g. character/item root templates).
 - `Ext.Template.GetAllCacheTemplates(): table<FixedString, GameObjectTemplate>`
 
 <a id="static-data"></a>
+
 ## Static Data - `Ext.StaticData`
 
 Access to static game resources such as Races, Classes, and other UUID-based engine definitions, via resource manager type (`ExtResourceManagerType`).
@@ -1824,6 +1952,7 @@ Access to static game resources such as Races, Classes, and other UUID-based eng
 Common manager types include: `ClassDescription`, `Progression`, `Feat`, `Race`, `Background`, `God`, etc.
 
 <a id="resources"></a>
+
 ## Resources - `Ext.Resource`
 
 Access to visual resources including Meshes, Materials, and Textures, via resource bank (`ResourceBankType`).
@@ -1836,6 +1965,7 @@ Access to visual resources including Meshes, Materials, and Textures, via resour
 Common bank types include `Visual`, `Material`, `Texture`, `Animation`, `Effect`, `Sound`, `Script`, etc.
 
 <a id="level"></a>
+
 ## Levels, Pathfinding & Physics - `Ext.Level`
 
 Contains logic for Raycasting, Pathfinding, and checking entity/tile physics data.
@@ -1872,6 +2002,7 @@ Contains logic for Raycasting, Pathfinding, and checking entity/tile physics dat
 `PhxPhysicsHit` includes `Position`, `Normal`, `Distance`, `Shape`, `PhysicsGroup`.
 
 <a id="math"></a>
+
 ## Math library - `Ext.Math`
 
 The extender math library `Ext.Math` contains following functions:
