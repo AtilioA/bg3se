@@ -28,17 +28,17 @@ public:
         return false;
     }
 
-    virtual Array<Guid> GetAll()
+    Array<Guid> GetAll() override
     {
         return {};
     }
 
-    virtual HashMap<Guid, Array<Guid>>* GetSources()
+    HashMap<Guid, Array<Guid>>* GetSources() override
     {
         return &dummySources_;
     }
 
-    virtual Array<Guid>* GetByModId(Guid modGuid)
+    Array<Guid>* GetByModId(Guid modGuid) override
     {
         return &dummyResources_;
     }
@@ -106,17 +106,17 @@ public:
         return true;
     }
 
-    virtual Array<Guid> GetAll()
+    Array<Guid> GetAll() override
     {
         return bank_->Resources.keys();
     }
 
-    virtual HashMap<Guid, Array<Guid>>* GetSources()
+    HashMap<Guid, Array<Guid>>* GetSources() override
     {
         return &bank_->ResourceGuidsByMod;
     }
 
-    virtual Array<Guid>* GetByModId(Guid modGuid)
+    Array<Guid>* GetByModId(Guid modGuid) override
     {
         return bank_->ResourceGuidsByMod.try_get(modGuid);
     }
@@ -266,6 +266,30 @@ Array<FixedString> GetAllResources(ResourceBankType type)
     return ids;
 }
 
+TextureAtlasMap* GetTextureAtlasManager()
+{
+    return *GetStaticSymbols().ls__gTextureAtlasMap;
+}
+
+TextureAtlas* GetTextureAtlas(STDString path)
+{
+    return (*GetStaticSymbols().ls__gTextureAtlasMap)->AtlasMap.get_or_default(path);
+}
+
+TextureAtlas* GetIconAtlas(FixedString icon)
+{
+    return (*GetStaticSymbols().ls__gTextureAtlasMap)->IconMap.get_or_default(icon);
+}
+
+UVValues* GetIconUVs(FixedString icon)
+{
+    auto atlas = (*GetStaticSymbols().ls__gTextureAtlasMap)->IconMap.get_or_default(icon);
+    if (atlas) {
+        return atlas->Icons.get_or_default(icon);
+    }
+
+    return nullptr;
+}
 
 void RegisterStaticDataLib()
 {
@@ -276,6 +300,9 @@ void RegisterStaticDataLib()
     MODULE_NAMED_FUNCTION("GetSources", GetGuidResourceSources)
     MODULE_NAMED_FUNCTION("GetByModId", GetGuidResourcesByModId)
     MODULE_NAMED_FUNCTION("Create", CreateGuidResource)
+    MODULE_NAMED_FUNCTION("GetTextureAtlasManager", GetTextureAtlasManager)
+    MODULE_NAMED_FUNCTION("GetIconAtlas", GetIconAtlas)
+    MODULE_NAMED_FUNCTION("GetIconUVs", GetIconUVs)
     END_MODULE()
 
     DECLARE_MODULE(Resource, Both)

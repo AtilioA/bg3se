@@ -4,6 +4,7 @@
 
 #include <Lua/Shared/Proxies/PropertyMapDependencies.h>
 #include <Lua/Shared/Proxies/PolymorphicPush.inl>
+#include <GameDefinitions/Generated/PropertyMapMeta.h>
 
 BEGIN_NS(lua)
 
@@ -100,7 +101,7 @@ void InheritProperties(GenericPropertyMap const& base, GenericPropertyMap& child
     for (auto prop : base.Properties) {
         auto const& p = prop.Value();
         child.AddRawProperty(prop.Key().GetString(), p.Get, p.Set, p.Serialize, p.Offset, p.Flag, 
-            p.PendingNotifications, p.NewName, p.Iterable);
+            p.PendingNotifications, p.NewName, p.Iterable, true);
     }
 
     for (auto const& prop : base.Validators) {
@@ -152,7 +153,7 @@ void AddBitfieldProperty(GenericPropertyMap& pm, BitfieldTypeId typeId, std::siz
     RawPropertyAccessors::Getter* getter,
     RawPropertyAccessors::Setter* setter)
 {
-    auto store = BitfieldRegistry::Get().BitfieldsById[typeId];
+    auto store = BitfieldRegistry::Get().Get(typeId);
     for (auto const& label : store->Values) {
         pm.AddRawProperty(label.Key.GetString(),
             getter,
@@ -161,7 +162,10 @@ void AddBitfieldProperty(GenericPropertyMap& pm, BitfieldTypeId typeId, std::siz
             nullptr,
             offset,
             BitfieldValueToFlag(label.Value),
-            PropertyNotification::None
+            PropertyNotification::None,
+            nullptr,
+            true,
+            false
         );
     }
 }
@@ -258,19 +262,16 @@ inline constexpr StructTypeId CheckedGetParentStructId()
     // FIXME - this check is not constexpr :(
     // static_assert(static_cast<T*>(reinterpret_cast<TBase*>(nullptr)) == reinterpret_cast<T*>(nullptr), "Base and child class should start at same base ptr");
 
-    return StructID<TBase>::ID;
+    return StructID<TBase>;
 }
 
 
 template <class T>
 inline constexpr StructTypeId CheckedGetDeclStructId()
 {
-    static_assert(!std::is_pointer_v<T>, "PropertyMap type should not be a pointer type!");
     static_assert(!IsByVal<T>, "PropertyMap type should not be a by-val type!");
-    static_assert(!IsOptional<T>::Value, "PropertyMap type should not be an optional<T> type!");
-    static_assert(!IsArrayLike<T>::Value && !IsSetLike<T>::Value && !IsMapLike<T>::Value && !IsVariantLike<T>::Value, "PropertyMap type should not be a container type!");
-
-    return StructID<T>::ID;
+    static_assert(IsStruct<T>, "Type should be a registered struct!");
+    return StructID<T>;
 }
 
 template <class T>
@@ -307,8 +308,20 @@ inline constexpr GenericPropertyMap::TConstructor* GetConstructor()
 template <class T>
 inline constexpr GenericPropertyMap::TDestructor* GetDestructor()
 {
-    if constexpr (std::is_default_constructible_v<T> && !std::is_base_of_v<Noesis::BaseObject, T> && !std::is_base_of_v<Noesis::Interface, T>) {
+    if constexpr (std::is_default_constructible_v<T> && !std::is_trivially_destructible_v<T> && !std::is_base_of_v<Noesis::BaseObject, T> && !std::is_base_of_v<Noesis::Interface, T>) {
         return &(DefaultDestroy<T>);
+    } else {
+        return nullptr;
+    }
+}
+
+template <class T>
+inline constexpr GenericPropertyMap::TDestructor* GetProxyDestructor()
+{
+    if constexpr (IsProxyComponentType<T>
+        && std::is_default_constructible_v<T> 
+        && !std::is_trivially_destructible_v<T>) {
+        return &(DefaultProxyDestroy<T>);
     } else {
         return nullptr;
     }
@@ -380,7 +393,7 @@ void ProcessPropertyMapDefinitions(PropertyMapRegistrationEntry const* defn)
             auto const& p = entry.Property;
             pm->AddRawProperty(p.Name, p.Getter, p.Setter,
                 p.Validate, p.Serialize, p.Offset, p.Flag,
-                p.Notification, p.NewName, p.Iterable
+                p.Notification, p.NewName, p.Iterable, false
             );
             break;
         }
@@ -409,8 +422,8 @@ bool IsResolved(PropertyMapRegistrationEntry const* defn)
 {
     while (defn->Type != PropertyMapEntryType::End) {
         if (defn->Type == PropertyMapEntryType::Inheritance) {
-            if (defn->Inherit.ParentId >= (int)gStructRegistry.StructsById.size()
-                || gStructRegistry.StructsById[defn->Inherit.ParentId] == nullptr) {
+            if ((int32_t)defn->Inherit.ParentId >= (int32_t)gStructRegistry.StructsById.size()
+                || gStructRegistry.StructsById[(int32_t)defn->Inherit.ParentId] == nullptr) {
                 return false;
             }
         }
@@ -476,6 +489,15 @@ void UpdateInheritance()
 template <class T>
 struct PropertyMapRegistrations;
 
+template <class T>
+inline constexpr RawPropertyAccessors::Serializer* PickPropertySerializer()
+{
+    if constexpr (!std::is_pointer_v<T>) {
+        return &(GenericSerializeValue<T>);
+    } else {
+        return &GenericNullSerializeProperty;
+    }
+}
     
 #define GENERATING_PROPMAP
 
@@ -510,10 +532,10 @@ struct PropertyMapRegistrations;
 #define PN(name, prop) \
         { .Type = PropertyMapEntryType::Property, .Property = { \
             .Name = #name, \
-            .Getter = &(GenericGetOffsetProperty<decltype(ObjectType::prop)>), \
-            .Setter = &(GenericSetOffsetProperty<decltype(ObjectType::prop)>), \
+            .Getter = &(GenericGetValue<decltype(ObjectType::prop)>), \
+            .Setter = &(GenericSetValue<decltype(ObjectType::prop)>), \
             .Validate = &(GenericValidateOffsetProperty<decltype(ObjectType::prop)>), \
-            .Serialize = &(GenericSerializeOffsetProperty<decltype(ObjectType::prop)>), \
+            .Serialize = PickPropertySerializer<decltype(ObjectType::prop)>(), \
             .Offset = offsetof(ObjectType, prop), \
             .Flag = 0, \
             .Notification = PropertyNotification::None \
@@ -522,10 +544,10 @@ struct PropertyMapRegistrations;
 #define PN_RO(name, prop) \
         { .Type = PropertyMapEntryType::Property, .Property = { \
             .Name = #name, \
-            .Getter = &(GenericGetOffsetProperty<decltype(ObjectType::prop)>), \
+            .Getter = &(GenericGetValue<decltype(ObjectType::prop)>), \
             .Setter = &GenericSetReadOnlyProperty, \
             .Validate = &(GenericValidateOffsetProperty<decltype(ObjectType::prop)>), \
-            .Serialize = &(GenericSerializeOffsetProperty<decltype(ObjectType::prop)>), \
+            .Serialize = PickPropertySerializer<decltype(ObjectType::prop)>(), \
             .Offset = offsetof(ObjectType, prop), \
             .Flag = 0, \
             .Notification = PropertyNotification::None \
@@ -536,10 +558,10 @@ struct PropertyMapRegistrations;
 #define P_NOTIFY(prop, notify) \
         { .Type = PropertyMapEntryType::Property, .Property = { \
             .Name = #prop, \
-            .Getter = &(GenericGetOffsetProperty<decltype(ObjectType::prop)>), \
-            .Setter = &(GenericSetOffsetProperty<decltype(ObjectType::prop)>), \
+            .Getter = &(GenericGetValue<decltype(ObjectType::prop)>), \
+            .Setter = &(GenericSetValue<decltype(ObjectType::prop)>), \
             .Validate = &(GenericValidateOffsetProperty<decltype(ObjectType::prop)>), \
-            .Serialize = &(GenericSerializeOffsetProperty<decltype(ObjectType::prop)>), \
+            .Serialize = PickPropertySerializer<decltype(ObjectType::prop)>(), \
             .Offset = offsetof(ObjectType, prop), \
             .Flag = 0, \
             .Notification = PropertyNotification::notify \
@@ -549,10 +571,10 @@ struct PropertyMapRegistrations;
         P(prop) \
         { .Type = PropertyMapEntryType::Property, .Property = { \
             .Name = #oldName, \
-            .Getter = &(GenericGetOffsetProperty<decltype(ObjectType::prop)>), \
-            .Setter = &(GenericSetOffsetProperty<decltype(ObjectType::prop)>), \
+            .Getter = &(GenericGetValue<decltype(ObjectType::prop)>), \
+            .Setter = &(GenericSetValue<decltype(ObjectType::prop)>), \
             .Validate = &(GenericValidateOffsetProperty<decltype(ObjectType::prop)>), \
-            .Serialize = &(GenericSerializeOffsetProperty<decltype(ObjectType::prop)>), \
+            .Serialize = PickPropertySerializer<decltype(ObjectType::prop)>(), \
             .Offset = offsetof(ObjectType, prop), \
             .Flag = 0, \
             .Notification = PropertyNotification::Renamed, \
@@ -565,7 +587,7 @@ struct PropertyMapRegistrations;
 #define P_BITMASK_GETTER_SETTER(prop, getter, setter) \
         { .Type = PropertyMapEntryType::Bitfield, .Bitfield = { \
             .Name = #prop, \
-            .TypeId = BitfieldID<decltype(ObjectType::prop)>::ID, \
+            .TypeId = BitfieldID<decltype(ObjectType::prop)>, \
             .Getter = &getter, \
             .Setter = &setter, \
             .Offset = offsetof(ObjectType, prop), \
@@ -663,6 +685,7 @@ void InitObjectProxyPropertyMaps()
     static bool initialized{ false };
     if (initialized) return;
 
+    gStructRegistry.Initialize(StructRegistrySize);
     ProcessClassRegistrations(std::span(AllClassDefns));
     UpdateInheritance();
 

@@ -52,7 +52,7 @@ public:
         // ...
     }
 
-    const TypeClass* GetClassType() const
+    const TypeClass* GetClassType() const override
     {
         return class_;
     }
@@ -104,7 +104,7 @@ public:
             TypePropertyOffset<T>::SetComponent(ptr, value);
 
             if (notify_) {
-                auto ctx = reinterpret_cast<NsCustomDataContext*>(ptr);
+                auto ctx = static_cast<NsCustomDataContext*>(ptr);
                 ctx->PropertyChanged().Invoke(ctx, PropertyChangedEventArgs(this->GetName()));
             }
 
@@ -112,7 +112,7 @@ public:
                 ContextGuardAnyThread ctx(ContextType::Client);
                 ecl::LuaClientPin pin(ecl::ExtensionState::Get());
                 if (pin && writeCallback_.IsValid(pin->GetState())) {
-                    pin->GetDeferredUIEvents().OnPropertyChanged(writeCallback_, reinterpret_cast<BaseComponent*>(ptr), this->GetName());
+                    pin->GetDeferredUIEvents().OnPropertyChanged(writeCallback_, static_cast<BaseComponent*>(ptr), this->GetName());
                 }
             }
         }
@@ -123,11 +123,11 @@ public:
         // Fast-path when no special features are enabled
         if (!notify_ && !writeCallback_) {
             TypePropertyOffset<T>::Set(ptr, value);
-        } else if (*reinterpret_cast<T const*>(this->Get(ptr)) != *reinterpret_cast<T const*>(value)) {
+        } else if (*static_cast<T const*>(this->Get(ptr)) != *static_cast<T const*>(value)) {
             TypePropertyOffset<T>::Set(ptr, value);
 
             if (notify_) {
-                auto ctx = reinterpret_cast<NsCustomDataContext*>(ptr);
+                auto ctx = static_cast<NsCustomDataContext*>(ptr);
                 ctx->PropertyChanged().Invoke(ctx, PropertyChangedEventArgs(this->GetName()));
             }
 
@@ -135,7 +135,7 @@ public:
                 ContextGuardAnyThread ctx(ContextType::Client);
                 ecl::LuaClientPin pin(ecl::ExtensionState::Get());
                 if (pin && writeCallback_.IsValid(pin->GetState())) {
-                    pin->GetDeferredUIEvents().OnPropertyChanged(writeCallback_, reinterpret_cast<BaseComponent*>(ptr), this->GetName());
+                    pin->GetDeferredUIEvents().OnPropertyChanged(writeCallback_, static_cast<BaseComponent*>(ptr), this->GetName());
                 }
             }
         }
@@ -149,6 +149,11 @@ public:
     void SetWriteCallback(lua::PersistentRegistryEntry&& writeCallback)
     {
         writeCallback_ = std::move(writeCallback);
+    }
+
+    void ReleaseWriteCallback(lua_State* L)
+    {
+        writeCallback_.Reset(L);
     }
 
 private:
@@ -167,7 +172,7 @@ public:
 
     static BaseComponent* GetWrapped(const void* ptr)
     {
-        return reinterpret_cast<NsCustomDataContext const*>(ptr)->GetWrappedContext();
+        return static_cast<NsCustomDataContext const*>(ptr)->GetWrappedContext();
     }
 
     void* GetContent(const void* ptr) const override
@@ -236,12 +241,12 @@ template <class T>
 class DynamicPropertyTypeImpl : public DynamicPropertyType
 {
 public:
-    uint32_t GetSize()
+    uint32_t GetSize() override
     {
         return sizeof(T);
     }
 
-    uint32_t GetAlignment()
+    uint32_t GetAlignment() override
     {
         return alignof(T);
     }
@@ -359,6 +364,17 @@ struct DynamicClassType
         }
     }
 
+    void ReleaseHandlers(lua_State* L)
+    {
+        for (auto const& prop : Properties) {
+            if (prop.Type->SupportsNotifications()) {
+                auto typeProp = static_cast<Noesis::TypePropertyOffsetSE<bool>*>(prop.Property);
+                typeProp->EnablePropertyChangedNotification(false);
+                typeProp->ReleaseWriteCallback(L);
+            }
+        }
+    }
+
     bool ValidateWrappedContext(Noesis::BaseComponent*& wrappedContext)
     {
         if (WrappedContextType == nullptr) {
@@ -399,7 +415,7 @@ struct DynamicClassType
             return nullptr;
         }
 
-        auto ctx = reinterpret_cast<Noesis::NsCustomDataContext *>(GameAllocRaw(Size));
+        auto ctx = static_cast<Noesis::NsCustomDataContext *>(GameAllocRaw(Size));
         new (ctx) NsCustomDataContext(Type, wrappedContext);
         for (auto const& prop : Properties) {
             prop.Type->ConstructProperty(ctx, prop.Offset);
@@ -445,6 +461,13 @@ void InitializeDynamicPropertyTypes()
     gDynamicPropertyTypes.set(FixedString("Object"), GameAlloc<DynamicPropertyTypeImplRW<Noesis::Ptr<Noesis::BaseComponent>>>());
     gDynamicPropertyTypes.set(FixedString("Collection"), GameAlloc<DynamicPropertyTypeImplRORef<Noesis::ObservableCollection<Noesis::BaseComponent>>>());
     gDynamicPropertyTypes.set(FixedString("Command"), GameAlloc<DynamicPropertyTypeImplRORef<Noesis::LuaDelegateCommand>>());
+}
+
+void ReleasePropertyChangeHandlers(lua_State* L)
+{
+    for (auto const& cls : gDynamicClasses) {
+        cls.Value()->ReleaseHandlers(L);
+    }
 }
 
 class ClassDefinitionBuilder

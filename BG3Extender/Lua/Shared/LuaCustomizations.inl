@@ -13,7 +13,7 @@ struct CppObjectUdata
         struct
         {
             MetatableTag Metatable;
-            uint32_t PropertyMap;
+            StructTypeId PropertyMap;
         };
     };
 };
@@ -290,14 +290,14 @@ struct CppValue
 };
 
 
-void* lua_push_newcppobject(lua_State* L, MetatableTag metatableTag, int propertyMapIndex, uint32_t size)
+void* lua_push_newcppobject(lua_State* L, MetatableTag metatableTag, StructTypeId propertyMapIndex, uint32_t size)
 {
-    se_assert(propertyMapIndex >= 0);
+    se_assert((int32_t)propertyMapIndex >= 0);
     auto sz = size + sizeof(CppObjectUdata);
     auto extra = CppLightObjectVal::MakeExtra(metatableTag, (uint16_t)propertyMapIndex, LifetimeHandle());
-    auto obj = reinterpret_cast<CppObjectUdata*>(lua_newcppobject(L, extra, sz));
+    auto obj = static_cast<CppObjectUdata*>(lua_newcppobject(L, extra, sz));
     obj->Metatable = metatableTag;
-    obj->PropertyMap = (uint32_t)propertyMapIndex;
+    obj->PropertyMap = propertyMapIndex;
     return obj + 1;
 }
 
@@ -548,7 +548,7 @@ bool lua_typecheck_cppvalue(lua_State* L, int idx, MetatableTag expectedMetatabl
         && CppValue::DecodePropertyMapTag(val) == propertyMapTag;
 }
 
-bool lua_typecheck_struct(lua_State* L, int idx, int propertyMapIndex)
+bool lua_typecheck_struct(lua_State* L, int idx, StructTypeId propertyMapIndex)
 {
     auto pm = gStructRegistry.Get(propertyMapIndex);
     int aidx = lua_absindex(L, idx);
@@ -749,7 +749,7 @@ char const* lua_get_function_location(lua_State* L, Ref const& reg, int& line)
 
 void* LuaCppCanonicalize(lua_State* L, void* val)
 {
-    auto v = reinterpret_cast<TValue*>(val);
+    auto v = static_cast<TValue*>(val);
     auto meta = lua_get_cppvalue(L, v);
     if (meta.MetatableTag != MetatableTag::EnumValue) {
         return nullptr;

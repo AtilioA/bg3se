@@ -141,6 +141,12 @@ struct ProficiencyGroupComponent : public BaseComponent
     [[bg3::legacy(field_0)]] ProficiencyGroupFlags Flags;
 };
 
+struct AreaLevelComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(AreaLevel, "eoc::stats::AreaLevelComponent")
+
+    int32_t Level;
+};
 
 struct FloatingComponent : public BaseComponent
 {
@@ -215,6 +221,7 @@ struct StealthComponent : public BaseComponent
 DEFINE_TAG_COMPONENT(eoc, ClientControlComponent, ClientControl)
 DEFINE_TAG_COMPONENT(ls, IsGlobalComponent, IsGlobal)
 DEFINE_TAG_COMPONENT(ls, SavegameComponent, Savegame)
+DEFINE_TAG_COMPONENT(ls::savegame, LoadedComponent, SavegameLoaded)
 
 struct DisabledEquipmentComponent : public BaseComponent
 {
@@ -809,7 +816,7 @@ struct RestTypeChosenEventOneFrameComponent : public BaseComponent
 
 struct ShortRestResultEventOneFrameComponent : public BaseComponent
 {
-    DEFINE_ONEFRAME_COMPONENT(ServerShortRestResultEvent, "esv::rest::ShortRestResultEventOneFrameComponent")
+    DEFINE_COMPONENT(ServerShortRestResultEvent, "esv::rest::ShortRestResultEventOneFrameComponent")
 
     bool Rested;
     RestErrorFlags ErrorFlags;
@@ -889,6 +896,9 @@ struct DataComponent : public BaseComponent
     GridStructure Grid;
     std::optional<FixedString> Level;
 };
+
+DEFINE_TAG_COMPONENT(eoc::spatial_grid, CharacterComponent, SpatialGridCharacter)
+DEFINE_TAG_COMPONENT(eoc::spatial_grid, ItemComponent, SpatialGridItem)
 
 END_NS()
 
@@ -1111,7 +1121,7 @@ BEGIN_NS(esv::approval)
 
 struct RatingsChangedOneFrameComponent : public BaseComponent
 {
-    DEFINE_ONEFRAME_COMPONENT(ServerRatingsChanged, "esv::approval::RatingsChangedOneFrameComponent")
+    DEFINE_COMPONENT(ServerRatingsChanged, "esv::approval::RatingsChangedOneFrameComponent")
 
     EntityHandle Subject;
     EntityHandle Avatar;

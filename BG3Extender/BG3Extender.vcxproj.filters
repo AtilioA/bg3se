@@ -401,7 +401,6 @@
     <ClInclude Include="Extender\Shared\Hooks.h" />
     <ClInclude Include="Lua\Shared\LuaTypeValidators.h" />
     <ClInclude Include="GameDefinitions\Base\Serialization.h" />
-    <ClInclude Include="Lua\Shared\LuaTypeTraits.h" />
     <ClInclude Include="Lua\Helpers\LuaPush.h" />
     <ClInclude Include="Lua\Helpers\LuaGet.h" />
     <ClInclude Include="Lua\Helpers\LuaGetObject.h" />
@@ -524,6 +523,17 @@
     <ClInclude Include="GameDefinitions\Components\Effect.h" />
     <ClInclude Include="GameDefinitions\Base\Genome.h" />
     <ClInclude Include="Extender\Shared\UpdaterAPI.h" />
+    <ClInclude Include="GameDefinitions\Components\Dummy.h" />
+    <ClInclude Include="GameDefinitions\Components\Physics.h" />
+    <ClInclude Include="GameDefinitions\Components\Level.h" />
+    <ClInclude Include="GameDefinitions\Components\Fade.h" />
+    <ClInclude Include="GameDefinitions\Components\Instancing.h" />
+    <ClInclude Include="GameDefinitions\Components\Script.h" />
+    <ClInclude Include="GameDefinitions\Generated\EnumerationMeta.h" />
+    <ClInclude Include="GameDefinitions\Generated\PropertyMapMeta.h" />
+    <ClInclude Include="GameDefinitions\Base\TypeMetadata.h" />
+    <ClInclude Include="GameDefinitions\Base\TypeId.h" />
+    <ClInclude Include="GameDefinitions\Base\WindowsSlim.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="BG3Extender.rc" />
@@ -787,6 +797,9 @@
     <None Include="GameDefinitions\Components\Effect.inl" />
     <None Include="Extender\Shared\UpdaterAPI.inl">
       <Filter>Extender\Shared</Filter>
+    </None>
+    <None Include="GameDefinitions\Components\Level.inl">
+      <Filter>GameDefinitions\Components</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>

@@ -92,6 +92,15 @@ struct ECSChangeLog
     void AddComponentChange(EntityWorld* world, EntityHandle entity, ComponentTypeIndex type, ComponentChangeFlags flags);
 };
 
+template <class T>
+void EntityProxyDeleteHelper(T** p)
+{
+    if (*p) {
+        GameDelete(*p);
+        *p = nullptr;
+    }
+}
+
 class EntitySystemHelpersBase : public Noncopyable<EntitySystemHelpersBase>
 {
 public:
@@ -198,19 +207,19 @@ public:
     template <class T>
     T* GetComponent(FixedString const& guid)
     {
-        return reinterpret_cast<T*>(GetRawComponent(guid, T::ComponentType));
+        return static_cast<T*>(GetRawComponent(guid, T::ComponentType));
     }
 
     template <class T>
     T* GetComponent(Guid const& guid)
     {
-        return reinterpret_cast<T*>(GetRawComponent(guid, T::ComponentType));
+        return static_cast<T*>(GetRawComponent(guid, T::ComponentType));
     }
 
     template <class T>
     T* GetComponent(EntityHandle entityHandle)
     {
-        return reinterpret_cast<T*>(GetRawComponent(entityHandle, T::ComponentType));
+        return static_cast<T*>(GetRawComponent(entityHandle, T::ComponentType));
     }
 
     template <class T>
@@ -227,8 +236,24 @@ public:
     template <class T>
     T* GetSystem()
     {
-        return reinterpret_cast<T*>(GetRawSystem(T::SystemType));
+        return static_cast<T*>(GetRawSystem(T::SystemType));
     }
+
+    template <class T>
+    inline T* CreateComponent(EntityHandle entity)
+    {
+        return static_cast<T*>(CreateComponentRaw(entity, T::ComponentType));
+    }
+
+    template <class T>
+    inline T* CreateComponentImmediate(EntityHandle entity)
+    {
+        return static_cast<T*>(CreateComponentImmediateRaw(entity, T::ComponentType));
+    }
+
+    void* CreateComponentRaw(EntityHandle entity, ExtComponentType type);
+    void* CreateComponentImmediateRaw(EntityHandle entity, ExtComponentType type);
+    bool RemoveComponent(EntityHandle entity, ExtComponentType type);
 
     virtual EntityWorld* GetEntityWorld() const = 0;
     virtual ExtensionStateBase* GetExtensionState() const = 0;
@@ -266,6 +291,8 @@ public:
     void NotifyReplicationFlagsDirtied();
 
     void* GetRawComponent(EntityHandle entityHandle, ExtComponentType type);
+    bool MarkComponentAsChanged(EntityHandle entityHandle, ExtComponentType type);
+    bool WasComponentChanged(EntityHandle entityHandle, ExtComponentType type);
     void* GetRawSingleton(ExtComponentType type);
     EntityHandle GetSingletonEntity(ExtComponentType type);
     ecs::SystemTypeEntry* GetSystemEntry(ExtSystemType type);
@@ -278,7 +305,7 @@ public:
     {
         auto p = GetRawSingleton(T::ComponentType);
         if (p != nullptr) {
-            return reinterpret_cast<T*>(p);
+            return static_cast<T*>(p);
         } else {
             return nullptr;
         }
@@ -299,7 +326,7 @@ public:
     bool SetSystemUpdateHook(SystemTypeIndex system, std::function<SystemHookProc> preUpdate, std::function<SystemHookProc> postUpdate);
 
 protected:
-    void MapComponentIndices(char const* componentName, ExtComponentType type, std::size_t size, bool isProxy);
+    void MapComponentIndices(char const* componentName, ExtComponentType type, std::size_t size, bool isProxy, bool oneFrame);
     void MapResourceManagerIndex(char const* componentName, ExtResourceManagerType type);
     void MapSystemIndex(char const* systemName, ExtSystemType type);
     void UpdateComponentMappings();

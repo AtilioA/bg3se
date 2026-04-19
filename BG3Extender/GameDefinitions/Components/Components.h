@@ -2,6 +2,7 @@
 
 #include <GameDefinitions/Base/Base.h>
 #include <GameDefinitions/EntitySystem.h>
+#include <GameDefinitions/Ai.h>
 
 BEGIN_SE()
 
@@ -325,104 +326,6 @@ struct UuidToHandleMappingComponent : public BaseComponent
     HashMap<Guid, EntityHandle> Mappings;
 };
 
-struct LevelComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(Level, "ls::LevelComponent")
-
-    [[bg3::legacy(field_0)]] EntityHandle RootLevel;
-    FixedString LevelName;
-};
-
-struct LevelRootComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(LevelRoot, "ls::LevelRootComponent")
-
-    FixedString LevelName;
-};
-
-struct LevelInstanceComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(LevelInstance, "ls::LevelInstanceComponent")
-
-    FixedString LevelInstanceID;
-    FixedString SubLevelName;
-    FixedString LevelInstanceTemplate;
-    uint8_t LevelType;
-    bool Active;
-    bool Platform;
-    bool MovingPlatform;
-    bool DynamicLayer;
-    bool NeedsPhysics;
-    bool HasTemplateAfterDestruction;
-    bool UseSoundOcclusion;
-    bool IsCinematic;
-    bool Activated;
-    Transform Transform;
-};
-
-struct LevelInstanceStateComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(LevelInstanceState, "ls::LevelInstanceStateComponent")
-
-    HashSet<EntityHandle> Children;
-    HashSet<EntityHandle> Children2;
-    int32_t State;
-    AABound LocalBound;
-    AABound WorldBound;
-    FixedString MergedLevelTemplateUUID;
-    FixedString LevelInstanceID;
-    FixedString LevelName;
-    FixedString LevelName2;
-    bool Destroyed;
-    bool MovingPlatform;
-    uint8_t field_A6;
-    Transform Transform;
-};
-
-struct LevelInstanceTempDestroyedComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(LevelInstanceTempDestroyed, "ls::level::LevelInstanceTempDestroyedComponent")
-
-    EntityHandle Level;
-};
-
-struct LevelUnloadEventComponent : public BaseComponent
-{
-    DEFINE_ONEFRAME_COMPONENT(LevelUnloadEvent, "ls::LevelUnloadEventComponent")
-
-    FixedString Level;
-};
-
-struct LevelPrepareUnloadEventComponent : public BaseComponent
-{
-    DEFINE_ONEFRAME_COMPONENT(LevelPrepareUnloadEvent, "ls::LevelPrepareUnloadEventComponent")
-
-    FixedString Level;
-};
-
-struct LevelUnloadedOneFrameComponent : public BaseComponent
-{
-    DEFINE_ONEFRAME_COMPONENT(LevelUnloaded, "ls::LevelUnloadedOneFrameComponent")
-
-    FixedString Level;
-};
-
-struct [[bg3::component]] SceneComponent : public Scene
-{
-    DEFINE_PROXY_COMPONENT(Scene, "ls::Scene")
-
-    [[bg3::hidden]] void* _PAD;
-};
-
-DEFINE_TAG_COMPONENT(ls, SceneRootComponent, SceneRoot)
-DEFINE_TAG_COMPONENT(ls, LevelIsOwnerComponent, LevelIsOwner)
-DEFINE_TAG_COMPONENT(ls, LevelPrepareUnloadBusyComponent, LevelPrepareUnloadBusy)
-DEFINE_TAG_COMPONENT(ls, LevelUnloadBusyComponent, LevelUnloadBusy)
-DEFINE_TAG_COMPONENT(ls::level, LevelInstanceUnloadingComponent, LevelInstanceUnloading)
-DEFINE_ONEFRAME_TAG_COMPONENT(ls, LevelInstanceUnloadedOneFrameComponent, LevelInstanceUnloaded)
-DEFINE_ONEFRAME_TAG_COMPONENT(ls, LevelInstanceLoadedOneFrameComponent, LevelInstanceLoaded)
-
-
 struct TransformComponent : public BaseComponent
 {
     DEFINE_COMPONENT(Transform, "ls::TransformComponent")
@@ -470,6 +373,33 @@ struct ChangedEventOneFrameComponent : public BaseComponent
 END_NS()
 
 
+BEGIN_NS(transform)
+
+struct GameplaySetTransformRequestsComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(GameplaySetTransform, "ls::transform::GameplaySetTransformRequestsComponent")
+
+    HashMap<EntityHandle, Transform> SetTransform;
+    HashMap<EntityHandle, Transform> CreateTransform;
+};
+
+struct InventoryMemberSetTransformRequestComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(InventoryMemberSetTransform, "ls::transform::InventoryMemberSetTransformRequestComponent")
+
+    HashMap<EntityHandle, Transform> SetTransform;
+};
+
+struct InventoryMemberSetTranslateRequestComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(InventoryMemberSetTranslate, "ls::transform::InventoryMemberSetTranslateRequestComponent")
+
+    HashMap<EntityHandle, glm::vec3> SetTranslate;
+};
+
+END_NS()
+
+
 BEGIN_NS(sight)
 
 struct SightBaseComponent : public BaseComponent
@@ -496,7 +426,6 @@ struct DataComponent : public BaseComponent
     int field_24;
 };
 
-
 struct EntityViewshedComponent : public BaseComponent
 {
     DEFINE_COMPONENT(SightEntityViewshed, "eoc::sight::EntityViewshedComponent")
@@ -513,6 +442,28 @@ struct IgnoreSurfacesComponent : public BaseComponent
 
 END_NS()
 
+BEGIN_NS(navcloud)
+
+struct ObstacleComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(NavcloudObstacle, "navcloud::ObstacleComponent")
+
+    glm::vec3 Position;
+    glm::vec3 Extents;
+    bool CanShootThrough;
+};
+
+struct ObstacleMetaDataComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(NavcloudObstacleMetaData, "navcloud::ObstacleMetaDataComponent")
+
+    HashSet<TilePos> field_0;
+    HashSet<TilePos> field_30;
+};
+
+DEFINE_TAG_COMPONENT(navcloud, InRangeComponent, NavcloudInRange)
+
+END_NS()
 
 BEGIN_NS(esv::sight)
 
@@ -593,6 +544,14 @@ inline uint64_t HashMapHash<esv::sight::EntityLosCheck>(esv::sight::EntityLosChe
 END_SE()
 
 BEGIN_NS(esv::sight)
+
+struct ViewshedParticipantComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(ServerViewshedParticipant, "esv::sight::ViewshedParticipantComponent")
+
+    glm::vec3 Position;
+    HashSet<EntityHandle> CanSee;
+};
 
 struct AggregatedDataComponent : public BaseComponent
 {
@@ -699,5 +658,18 @@ BEGIN_NS(game)
 
 DEFINE_TAG_COMPONENT(ls::game, PauseExcludedComponent, PauseExcluded)
 DEFINE_TAG_COMPONENT(ls::game, PauseComponent, Pause)
+
+END_NS()
+
+BEGIN_NS(esv::uuid)
+
+struct HistoryMappingComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(ServerUuidHistoryMapping, "esv::uuid::HistoryMappingComponent")
+
+    HashMap<EntityHandle, Guid> Mappings;
+};
+
+DEFINE_TAG_COMPONENT(esv::uuid, HistoryTrackedComponent, UuidHistoryTracked)
 
 END_NS()

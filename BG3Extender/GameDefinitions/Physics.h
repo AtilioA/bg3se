@@ -242,7 +242,7 @@ struct [[bg3::hidden]] PhysXScene : public PhysicsScene
     bool SceneActive;
     int DisableSimulationMask;
     int ClothCollisionMask;
-    glm::vec3 SceneBounds[2];
+    std::array<glm::vec3, 2> SceneBounds;
     void* PhysicsSkinningBatch;
     void* SceneQueryBatch;
     void* SceneQueryTaskBatch;
@@ -251,6 +251,5 @@ struct [[bg3::hidden]] PhysXScene : public PhysicsScene
     __int64 field_268;
     uint8_t field_270;
 };
-
 
 END_NS()

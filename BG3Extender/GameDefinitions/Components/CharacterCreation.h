@@ -64,17 +64,17 @@ struct CompanionDefinitionComponent : public BaseComponent
 {
     DEFINE_COMPONENT(CCCompanionDefinition, "eoc::character_creation::CompanionDefinitionComponent")
 
-    Guid field_0;
-    Guid field_10;
-    uint8_t field_20;
-    uint8_t field_21;
-    Guid field_28;
+    [[bg3::legacy(field_0)]] Guid Race;
+    [[bg3::legacy(field_10)]] Guid Subrace;
+    [[bg3::legacy(field_20)]] uint8_t BodyType;
+    [[bg3::legacy(field_21)]] uint8_t BodyShape;
+    [[bg3::legacy(field_28)]] Guid RootTemplate;
     Appearance Visual;
-    Guid field_110;
-    Guid field_120;
+    [[bg3::legacy(field_110)]] Guid Voice;
+    [[bg3::legacy(field_120)]] Guid VOLines;
     uint8_t field_130;
     [[bg3::legacy(field_138)]] uint32_t IconVersion;
-    [[bg3::legacy(field_13C)]] bool HasIcon;
+    [[bg3::legacy(field_13C)]] uint8_t HasIcon;
 };
 
 
@@ -83,7 +83,7 @@ struct DefinitionCommonComponent : public BaseComponent
     DEFINE_COMPONENT(CCDefinitionCommon, "eoc::character_creation::DefinitionCommonComponent")
 
     [[bg3::legacy(field_0)]] int ChangeId;
-    __int64 field_8;
+    [[bg3::legacy(field_8)]] uint64_t PendingChoices;
     ValidationError Error;
 };
 
@@ -111,8 +111,8 @@ struct FullRespecDefinitionComponent : public BaseComponent
     DEFINE_COMPONENT(CCFullRespecDefinition, "eoc::character_creation::FullRespecDefinitionComponent")
 
     FullRespecDefinition Definition;
-    Guid field_1C0;
-    Guid field_1D0;
+    [[bg3::legacy(field_1C0)]] Guid NewClass;
+    [[bg3::legacy(field_1D0)]] Guid NewSubclass;
     int field_1E0;
     LevelUpUpgrades LevelUpUpgrades;
     Array<SpellMetaId> Spells;
@@ -132,11 +132,11 @@ struct RespecDefinitionComponent : public BaseComponent
 struct ChangeAppearanceDefinitionBase
 {
     STDString Name;
-    uint8_t field_18;
-    uint8_t field_19;
+    [[bg3::legacy(field_18)]] uint8_t BodyType;
+    [[bg3::legacy(field_19)]] uint8_t BodyShape;
     Guid RootTemplate;
     Guid Voice;
-    uint8_t field_40;
+    [[bg3::legacy(field_40)]] uint8_t Identity;
     Appearance Visual;
 };
 
@@ -146,9 +146,9 @@ struct ChangeAppearanceDefinitionComponent : public BaseComponent
 
     FullRespecDefinition Definition;
     ChangeAppearanceDefinitionBase Appearance;
-    int32_t field_2E0;
-    uint8_t field_2E4;
-    EntityHandle field_2E8;
+    [[bg3::legacy(field_2E0)]] int32_t Version;
+    [[bg3::legacy(field_2E4)]] bool Synced;
+    [[bg3::legacy(field_2E8)]] EntityHandle Character;
 };
 
 
@@ -159,7 +159,7 @@ struct CharacterDefinitionComponent : public BaseComponent
     CharacterDefinition Definition;
     uint8_t field_288;
     [[bg3::legacy(field_28C)]] int ChangeId;
-    [[bg3::legacy(field_290)]] bool NeedsSync;
+    [[bg3::legacy(field_290), bg3::legacy(NeedsSync)]] bool Synced;
 };
 
 
@@ -240,7 +240,7 @@ struct CreationComponent : public BaseComponent
 {
     DEFINE_COMPONENT(CCCreation, "eoc::character_creation::definition::CreationComponent")
 
-    Array<EntityHandle> field_0;
+    [[bg3::legacy(field_0)]] Array<EntityHandle> CharacterDefinitions;
     uint8_t field_10;
 };
 
@@ -295,14 +295,14 @@ struct CompanionDefinitionComponent : public BaseComponent
 {
     DEFINE_COMPONENT(ClientCCCompanionDefinition, "ecl::character_creation::CompanionDefinitionComponent")
 
-    Guid field_0;
-    Guid field_10;
-    uint8_t field_20;
-    uint8_t field_21;
-    Guid field_28;
+    [[bg3::legacy(field_0)]] Guid Race;
+    [[bg3::legacy(field_10)]] Guid Subrace;
+    [[bg3::legacy(field_20)]] uint8_t BodyType;
+    [[bg3::legacy(field_21)]] uint8_t BodyShape;
+    [[bg3::legacy(field_28)]] Guid RootTemplate;
     bg3se::character_creation::Appearance Visual;
-    Guid field_110;
-    Guid field_120;
+    [[bg3::legacy(field_110)]] Guid Voice;
+    [[bg3::legacy(field_120)]] Guid VOLines;
     uint8_t field_130;
 };
 
@@ -324,11 +324,11 @@ struct FullRespecDefinitionComponent : public BaseComponent
 {
     DEFINE_COMPONENT(ClientCCFullRespecDefinition, "ecl::character_creation::FullRespecDefinitionComponent")
 
-    Guid field_0;
-    Guid field_10;
+    [[bg3::legacy(field_0)]] Guid NewClass;
+    [[bg3::legacy(field_10)]] Guid NewSubclass;
     int field_20;
     LevelUpUpgrades LevelUpUpgrades;
-    [[bg3::hidden]] Array<void*> SpellIds;
+    Array<SpellMetaId> Spells;
 };
 
 struct DummyDefinitionComponent : public BaseComponent
@@ -339,9 +339,8 @@ struct DummyDefinitionComponent : public BaseComponent
     [[bg3::legacy(field_8)]] int ChangeId;
     [[bg3::legacy(field_C)]] int ChangeId2;
     int field_10;
-    HashMap<uint64_t, FixedString> field_18_Map_unk_FS;
-    uint8_t field_58;
-    uint8_t field_59;
+    HashMap<ItemSlot, FixedString> field_18_Map_unk_FS;
+    [[bg3::legacy(field_58)]] std::optional<ArmorSetState> ArmorSetState;
     uint8_t field_5A;
     uint8_t field_5B;
     [[bg3::legacy(field_60)]] Guid RootTemplate;
@@ -350,10 +349,10 @@ struct DummyDefinitionComponent : public BaseComponent
     [[bg3::legacy(field_81)]] uint8_t BodyShape;
     [[bg3::legacy(field_88)]] Guid Race;
     [[bg3::legacy(field_98)]] Guid Subrace;
-    [[bg3::hidden]] Array<void*> field_A8;
-    [[bg3::hidden]] Array<void*> field_B8;
+    Array<Guid> Classes;
+    Array<Guid> Subclasses;
     bg3se::character_creation::Appearance Visual;
-    uint8_t field_1A0;
+    [[bg3::legacy(field_1A0)]] uint8_t Identity;
     EntityHandle field_1A8;
 };
 

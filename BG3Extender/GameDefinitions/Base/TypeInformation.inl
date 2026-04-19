@@ -2,6 +2,23 @@
 
 BEGIN_SE()
 
+
+StaticTypeInformation::InitializerProc* MakeDeferredTypeInitializer(Overload<Noesis::BaseCollection>)
+{
+    return &MakeDeferredArrayType<Noesis::BaseComponent*>;
+}
+
+StaticTypeInformation::InitializerProc* MakeDeferredTypeInitializer(Overload<Noesis::BaseObservableCollection>)
+{
+    return &MakeDeferredArrayType<Noesis::BaseComponent*>;
+}
+
+StaticTypeInformation::InitializerProc* MakeDeferredTypeInitializer(Overload<Noesis::UIElementCollection>)
+{
+    return &MakeDeferredArrayType<Noesis::UIElement*>;
+}
+
+
 TypeInformation const& TypeInformationRef::Get() const
 {
     if (ref_ && ref_->Type) {
@@ -165,6 +182,11 @@ void TypeInformation::Validate()
     }
 }
 
+__declspec(noinline) void TypeInformation::AddMember(char const* name, TypeInformationRef&& type)
+{
+    Members.insert(std::make_pair(FixedString(name), std::move(type)));
+}
+
 TypeInformationRepository& TypeInformationRepository::GetInstance()
 {
     static std::unique_ptr<TypeInformationRepository> instance = std::make_unique<TypeInformationRepository>();
@@ -223,6 +245,8 @@ void TypeInformationRepository::Initialize()
 
     auto& ivec2 = RegisterStaticType<glm::ivec2>("ivec2", LuaTypeId::Array);
     ivec2.ElementType = GetStaticTypeInfo(Overload<int32_t>{});
+    auto& ivec3 = RegisterStaticType<glm::ivec3>("ivec3", LuaTypeId::Array);
+    ivec3.ElementType = GetStaticTypeInfo(Overload<int32_t>{});
     auto& ivec4 = RegisterStaticType<glm::ivec4>("ivec4", LuaTypeId::Array);
     ivec4.ElementType = GetStaticTypeInfo(Overload<int32_t>{});
     auto& i16vec2 = RegisterStaticType<glm::i16vec2>("i16vec2", LuaTypeId::Array);
@@ -249,17 +273,22 @@ void TypeInformationRepository::Initialize()
     auto& version = RegisterStaticType<Version>("Version", LuaTypeId::Array);
     version.ElementType = GetStaticTypeInfo(Overload<int32_t>{});
 
+    RegisterStaticType<stats::ConditionId>("stats::ConditionId", LuaTypeId::String);
+    RegisterStaticType<StatsExpressionRef>("StatsExpressionRef", LuaTypeId::String);
+    RegisterStaticType<EntityOrVec3Variant>("EntityOrVec3Variant", LuaTypeId::Any);
+
+    RegisterObjectProxyTypeInformation();
+
+    // Struct refs need to be registered after struct registration is complete
     auto& typeRef = RegisterStaticType<TypeInformationRef>("TypeInformationRef", LuaTypeId::Object);
     typeRef.ParentType = GetStaticTypeInfo(Overload<TypeInformation>{});
 
     auto& nsCollection = RegisterStaticType<Noesis::BaseCollection>("Noesis::BaseCollection", LuaTypeId::Array);
     nsCollection.ElementType = GetStaticTypeInfo(Overload<Noesis::BaseObject>{});
+}
 
-    RegisterStaticType<stats::ConditionId>("stats::ConditionId", LuaTypeId::String);
-    RegisterStaticType<StatsExpressionRef>("StatsExpressionRef", LuaTypeId::String);
-
-    RegisterObjectProxyTypeInformation();
-
+void TypeInformationRepository::Finalize()
+{
     lua::gModuleRegistry.RegisterTypeInformation();
 
     for (auto type : initializers_) {
@@ -348,6 +377,38 @@ TypeInformation& TypeInformationRepository::RegisterType(char const* name, LuaTy
     ty.Kind = typeId;
     ty.IsBuiltin = true;
     return ty;
+}
+
+
+StaticTypeInformationRepository gStaticTypeInformationRepository;
+
+void StaticTypeInformationRepository::Initialize(int32_t numStructs, int32_t numEnums, int32_t numBitfields)
+{
+    se_assert(structs_.empty());
+    structs_.resize(numStructs);
+    enums_.resize(numEnums);
+    bitfields_.resize(numBitfields);
+}
+
+void StaticTypeInformationRepository::RegisterStruct(TypeInformation& ty, StructTypeId id)
+{
+    se_assert((uint32_t)id < structs_.size());
+    se_assert(structs_[(int32_t)id].Type == nullptr);
+    structs_[(int32_t)id].Type = &ty;
+}
+
+void StaticTypeInformationRepository::RegisterEnum(TypeInformation& ty, EnumTypeId id)
+{
+    se_assert((uint32_t)id < enums_.size());
+    se_assert(enums_[(int32_t)id].Type == nullptr);
+    enums_[(int32_t)id].Type = &ty;
+}
+
+void StaticTypeInformationRepository::RegisterBitfield(TypeInformation& ty, BitfieldTypeId id)
+{
+    se_assert((uint32_t)id < bitfields_.size());
+    se_assert(bitfields_[(int32_t)id].Type == nullptr);
+    bitfields_[(int32_t)id].Type = &ty;
 }
 
 END_SE()

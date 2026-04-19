@@ -20,39 +20,39 @@ public:
 
     inline static void Make(lua_State* L, GenericPropertyMap const& pm, void* object, LifetimeHandle lifetime)
     {
-        lua_push_lightcppobject(L, MetaTag, pm.RegistryIndex, object, lifetime);
+        lua_push_lightcppobject(L, MetaTag, (int32_t)pm.RegistryIndex, object, lifetime);
     }
 
     inline static void Make(lua_State* L, GenericPropertyMap const& pm, void const* object, LifetimeHandle lifetime)
     {
         // TODO - add RO tag
-        lua_push_lightcppobject(L, MetaTag, pm.RegistryIndex, object, lifetime);
+        lua_push_lightcppobject(L, MetaTag, (int32_t)pm.RegistryIndex, object, lifetime);
     }
 
     template <class T>
     inline static void Make(lua_State* L, T* object, LifetimeHandle lifetime)
     {
-        lua_push_lightcppobject(L, MetaTag, StructID<T>::ID, object, lifetime);
+        lua_push_lightcppobject(L, MetaTag, (int32_t)StructID<T>, object, lifetime);
     }
 
     template <class T>
     inline static void Make(lua_State* L, T const* object, LifetimeHandle lifetime)
     {
         // TODO - add RO tag
-        lua_push_lightcppobject(L, MetaTag, StructID<T>::ID, object, lifetime);
+        lua_push_lightcppobject(L, MetaTag, (int32_t)StructID<T>, object, lifetime);
     }
 
     template <class T>
     inline static T* Copy(lua_State* L, T&& object)
     {
-        auto p = reinterpret_cast<T*>(lua_push_newcppobject(L, MetaTag, StructID<T>::ID, sizeof(T)));
+        auto p = reinterpret_cast<T*>(lua_push_newcppobject(L, MetaTag, (int32_t)StructID<T>, sizeof(T)));
         *p = std::move(object);
         return p;
     }
 
     static GenericPropertyMap& GetPropertyMap(CppObjectMetadata const& meta);
-    static void* TryGetGeneric(lua_State* L, int index, int propertyMapIndex);
-    static void* GetGeneric(lua_State* L, int index, int propertyMapIndex);
+    static void* TryGetGeneric(lua_State* L, int index, StructTypeId typeId);
+    static void* GetGeneric(lua_State* L, int index, StructTypeId typeId);
 
     template <class T>
     static T* TryGet(lua_State* L, int index)
@@ -64,7 +64,7 @@ public:
     template <class T>
     static T* Get(lua_State* L, int index)
     {
-        auto ptr = GetGeneric(L, index, StructID<T>::ID);
+        auto ptr = GetGeneric(L, index, StructID<T>);
         return reinterpret_cast<T*>(ptr);
     }
 
@@ -94,7 +94,8 @@ public:
     template <class T>
     inline static void MakeRef(lua_State* L, T* object, LifetimeHandle lifetime)
     {
-        if (!gStructRegistry.ValidateIfNecessary(StructID<std::remove_cv_t<T>>::ID, object)) {
+        static_assert(IsStruct<std::remove_cv_t<T>>, "Can only use object proxies on registered struct types");
+        if (!gStructRegistry.ValidateIfNecessary(StructID<std::remove_cv_t<T>>, object)) {
             push(L, nullptr);
         } else {
             LightObjectProxyMetatable::Make(L, object, lifetime);
@@ -112,7 +113,7 @@ public:
     template <class T>
     inline static T* Get(lua_State* L, int index)
     {
-        return reinterpret_cast<T*>(GetRaw(L, index, GetStaticPropertyMap<T>()));
+        return static_cast<T*>(GetRaw(L, index, GetStaticPropertyMap<T>()));
     }
 };
 

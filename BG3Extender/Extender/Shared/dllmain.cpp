@@ -3,9 +3,6 @@
 #include <Extender/Shared/ExtenderConfig.h>
 #include <Extender/ScriptExtender.h>
 #include <CoreLib/JsonLibs.h>
-#include <ShellAPI.h>
-#include <KnownFolders.h>
-#include <ShlObj.h>
 #include <sstream>
 #include <fstream>
 #include <Extender/Shared/ExtenderConfig.inl>
@@ -17,6 +14,11 @@ void SetupScriptExtender(HMODULE hModule)
     gExtender = std::make_unique<ScriptExtender>();
     auto & config = gExtender->GetConfig();
     LoadConfig(L"ScriptExtenderSettings.json", config);
+
+    // Enable console if shift is down when the game is launched
+    if (GetAsyncKeyState(VK_SHIFT) < 0) {
+        config.CreateConsole = true;
+    }
 
     DisableThreadLibraryCalls(hModule);
     if (config.CreateConsole) {

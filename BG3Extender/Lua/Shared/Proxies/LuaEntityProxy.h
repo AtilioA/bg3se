@@ -71,7 +71,9 @@ public:
 
 private:
     static UserReturn CreateComponent(lua_State* L, EntityHandle entity, ExtComponentType component);
+    static UserReturn CreateComponentImmediate(lua_State* L, EntityHandle entity, ExtComponentType component);
     static bool RemoveComponent(lua_State* L, EntityHandle entity, ExtComponentType component);
+    static bool RemoveComponentImmediate(lua_State* L, EntityHandle entity, ExtComponentType component);
     static UserReturn GetComponent(lua_State* L, EntityHandle entity, ExtComponentType component);
     static bool HasRawComponent(lua_State* L, EntityHandle entity, STDString componentName);
     static UserReturn GetAllComponents(lua_State* L, EntityHandle entity, std::optional<bool> warnOnMissing);
@@ -81,6 +83,8 @@ private:
     static std::optional<NetId> GetNetId(lua_State* L, EntityHandle entity);
 
     static void Replicate(lua_State* L, EntityHandle entity, ExtComponentType component);
+    static bool MarkChanged(lua_State* L, EntityHandle entity, ExtComponentType component);
+    static bool WasChanged(lua_State* L, EntityHandle entity, ExtComponentType component);
     static void SetReplicationFlags(lua_State* L, EntityHandle entity, ExtComponentType component, uint64_t flags, std::optional<uint32_t> qword);
     static uint64_t GetReplicationFlags(lua_State* L, EntityHandle entity, ExtComponentType component, std::optional<uint32_t> qword);
     

@@ -159,7 +159,7 @@ void* FrameAllocator::Allocate(uint16_t size)
         offset = (uint64_t)InterlockedExchangeAdd64(&curPage->Offset, realSize);
     }
 
-    return curPage + offset;
+    return (uint8_t*)curPage + offset;
 }
 
 FrameAllocator::FrameBuffer* FrameAllocator::AllocPage()
@@ -320,6 +320,43 @@ void* EntityStorageData::GetComponent(ComponentFrameStorageIndex const& entityPt
     }
 }
 
+bool EntityStorageData::MarkComponentAsChanged(EntityHandle entity, ComponentTypeIndex component)
+{
+    auto componentSlot = ComponentTypeToIndex.try_get(component);
+    if (componentSlot) {
+        auto storageIndex = InstanceToPageMap.try_get(entity);
+        if (storageIndex) {
+            auto& page = Components[storageIndex->PageIndex]->Components[*componentSlot];
+            uint64_t entryMask = 1ull << (storageIndex->EntryIndex & 0x3f);
+            if (!(page.ModifiedEntities & entryMask)) {
+                page.ModifiedEntities |= entryMask;
+
+                if (!ModifiedComponents[*componentSlot]) {
+                    ModifiedComponents.AtomicSet(*componentSlot);
+                }
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool EntityStorageData::WasComponentChanged(EntityHandle entity, ComponentTypeIndex component)
+{
+    auto componentSlot = ComponentTypeToIndex.try_get(component);
+    if (componentSlot && ModifiedComponents[*componentSlot]) {
+        auto storageIndex = InstanceToPageMap.try_get(entity);
+        if (storageIndex) {
+            auto& page = Components[storageIndex->PageIndex]->Components[*componentSlot];
+            uint64_t entryMask = 1ull << (storageIndex->EntryIndex & 0x3f);
+            return (page.ModifiedEntities & entryMask) != 0;
+        }
+    }
+
+    return false;
+}
+
 void* ImmediateWorldCache::Changes::GetChange(EntityHandle entityHandle, ComponentTypeIndex type) const
 {
     auto typeIdx = (uint16_t)type;
@@ -333,7 +370,7 @@ void* ImmediateWorldCache::Changes::GetChange(EntityHandle entityHandle, Compone
     return nullptr;
 }
 
-ImmediateWorldCache::ComponentChanges* ImmediateWorldCache::Changes::AddComponentChanges(ComponentTypeEntry const* type, FrameAllocator* allocator)
+ImmediateWorldCache::ComponentChanges* ImmediateWorldCache::Changes::GetOrAddComponentChanges(ComponentTypeEntry const* type, FrameAllocator* allocator)
 {
     auto typeIdx = (uint16_t)type->TypeId;
     auto components = ComponentsByType + typeIdx;
@@ -348,41 +385,75 @@ ImmediateWorldCache::ComponentChanges* ImmediateWorldCache::Changes::AddComponen
     return components;
 }
 
-ImmediateWorldCache::ComponentChanges* ImmediateWorldCache::AddComponentChanges(ComponentTypeIndex type)
+ImmediateWorldCache::ComponentChanges* ImmediateWorldCache::GetOrAddComponentChanges(ComponentTypeIndex type)
 {
     auto typeIdx = (uint16_t)type;
     auto typeInfo = EntityWorld->ComponentRegistry_.Get(type);
-    return WriteChanges.AddComponentChanges(typeInfo, Allocator);
+    return WriteChanges.GetOrAddComponentChanges(typeInfo, Allocator);
 }
 
 bool ImmediateWorldCache::RemoveComponent(EntityHandle entity, ComponentTypeIndex type)
 {
-    auto changes = AddComponentChanges(type);
-    auto change = changes->Components.find(entity);
-    if (!change) {
-        auto typeInfo = EntityWorld->ComponentRegistry_.Get(type);
-        // TODO - different behavior for proxy objects?
-        auto component = EntityWorld->GetRawComponent(entity, type, typeInfo->InlineSize, false);
-        if (component) {
-            auto& onDestroy = Callbacks->Get(type)->OnDestroy;
-            EntityRef e{
-                .Handle = entity,
-                .World = EntityWorld
-            };
-            onDestroy.Invoke(&e, component);
-
-            change = changes->Components.add_uninitialized(entity);
-            // Default change means deletion
-            new (change) ComponentChange();
-            return true;
-        } else {
-            WARN("Tried to remove component [%d] that does not exist on entity [%08x]!", type, entity.Handle);
-            return false;
-        }
-    } else {
-        WARN("A change for component [%d] already exists on entity [%08x]!", type, entity.Handle);
+    auto typeInfo = EntityWorld->ComponentRegistry_.Get(type);
+    auto component = EntityWorld->GetRawComponent(entity, type, typeInfo->InlineSize, false);
+    if (!component) {
         return false;
     }
+
+    auto changes = GetOrAddComponentChanges(type);
+    auto change = changes->Components.find(entity);
+
+    if (!change) {
+        // TODO - different behavior for proxy objects?
+        auto& onDestroy = Callbacks->Get(type)->OnDestroy;
+        EntityRef e{
+            .Handle = entity,
+            .World = EntityWorld
+        };
+        onDestroy.Invoke(&e, component);
+
+        // Default change means deletion
+        change = changes->Components.add(entity, ComponentChange{});
+        return true;
+    } else {
+        WARN("A change for component [%d] already exists on entity [%016llx]!", type, entity.Handle);
+        return false;
+    }
+}
+
+bool ImmediateWorldCache::PrepareAddComponent(EntityHandle entity, ComponentTypeIndex type, void*& component)
+{
+    auto typeInfo = EntityWorld->ComponentRegistry_.Get(type);
+    if (EntityWorld->GetRawComponent(entity, type, typeInfo->InlineSize, false)) {
+        return false;
+    }
+
+    auto changes = GetOrAddComponentChanges(type);
+    auto change = changes->Components.find(entity);
+
+    if (!change) {
+        ComponentFrameStorageIndex index;
+        component = changes->FrameStorage.Allocate(index);
+        change = changes->Components.add(entity, ComponentChange{
+            .Ptr = component,
+            .StorageIndex = index
+        });
+        return true;
+    } else {
+        WARN("A change for component [%d] already exists on entity [%016llx]!", type, entity.Handle);
+        return false;
+    }
+}
+
+void ImmediateWorldCache::FinalizeAddComponent(EntityHandle entity, ComponentTypeIndex type, void* component)
+{
+    // TODO - different behavior for proxy objects?
+    auto& onConstruct = Callbacks->Get(type)->OnConstruct;
+    EntityRef e{
+        .Handle = entity,
+        .World = EntityWorld
+    };
+    onConstruct.Invoke(&e, component);
 }
 
 ECSComponentDataMap::ECSComponentDataMap()
@@ -499,24 +570,40 @@ void* EntityCommandBuffer::GetComponentChange(ComponentTypeIndex type, Component
     return nullptr;
 }
 
-void* EntityCommandBuffer::CreateComponent(EntityHandle entity, ComponentTypeIndex type, uint16_t componentSize, ComponentFrameStorageIndex& index)
+ComponentFrameStorage* EntityCommandBuffer::GetStorage(ComponentTypeIndex type, uint16_t componentSize, void* dtor)
 {
     auto storage = Data.ComponentPools.Find(type);
     if (!storage) {
         storage = Data.ComponentPools.Add(type, Allocator);
         storage->ComponentSizeInBytes = componentSize;
         storage->ComponentTypeId = type;
-        // TODO - bind dtor
-        storage->DestructorProc = nullptr;
+        storage->DestructorProc = dtor;
     }
 
+    return storage;
+}
+
+void* EntityCommandBuffer::CreateComponentRaw(EntityHandle entity, ComponentTypeIndex type, uint16_t componentSize, ComponentFrameStorageIndex& index, void* dtor)
+{
+    auto storage = GetStorage(type, componentSize, dtor);
+
     auto component = storage->Allocate(index);
-    auto changes = Data.EntityChanges.add(entity, Allocator);
+    auto changes = Data.GetOrAddEntityChange(entity);
     auto change = changes->Store.add();
     change->Index = index;
     change->ComponentTypeId = type;
 
     return component;
+}
+
+void EntityCommandBuffer::RemoveComponent(EntityHandle entity, ComponentTypeIndex type, uint16_t componentSize, void* dtor)
+{
+    auto storage = GetStorage(type, componentSize, dtor);
+
+    auto changes = Data.GetOrAddEntityChange(entity);
+    auto change = changes->Store.add();
+    change->Index = ComponentFrameStorageIndex{};
+    change->ComponentTypeId = type;
 }
 
 void* EntityWorld::GetRawComponent(EntityHandle entityHandle, ComponentTypeIndex type, std::size_t componentSize, bool isProxy)
@@ -546,6 +633,29 @@ void* EntityWorld::GetRawComponent(EntityHandle entityHandle, ComponentTypeIndex
     }
 
     return nullptr;
+}
+
+bool EntityWorld::MarkComponentAsChanged(EntityHandle entity, ComponentTypeIndex component)
+{
+    auto storage = GetEntityStorage(entity);
+    if (storage) {
+        if (storage->MarkComponentAsChanged(entity, component)) {
+            if (!Storage->UsedFrameDataStorages[storage->StorageIndex]) {
+                Storage->UsedFrameDataStorages.Set(storage->StorageIndex);
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool EntityWorld::WasComponentChanged(EntityHandle entity, ComponentTypeIndex component)
+{
+    auto storage = GetEntityStorage(entity);
+    return storage
+        && Storage->UsedFrameDataStorages[storage->StorageIndex]
+        && storage->WasComponentChanged(entity, component);
 }
 
 bool EntityWorld::IsValid(EntityHandle entityHandle) const
@@ -670,6 +780,82 @@ STDString SimplifyComponentName(StringView name)
     }
 
     return key;
+}
+
+void* EntitySystemHelpersBase::CreateComponentRaw(EntityHandle entity, ExtComponentType type)
+{
+    auto const& meta = GetComponentMeta(type);
+    if (meta.ComponentIndex == UndefinedComponent
+        || meta.Properties == nullptr
+        || meta.Properties->Construct == nullptr) {
+        return nullptr;
+    }
+
+    ComponentFrameStorageIndex index;
+    if (meta.IsProxy) {
+        auto ptr = (void**)GetEntityWorld()->Deferred()->CreateComponentRaw(entity, meta.ComponentIndex, sizeof(void*), index, meta.Properties->ProxyDestroy);
+        *ptr = GameAllocRaw(meta.Size);
+        memset(*ptr, 0, meta.Size);
+        meta.Properties->Construct(*ptr);
+        return *ptr;
+    } else {
+        auto ptr = GetEntityWorld()->Deferred()->CreateComponentRaw(entity, meta.ComponentIndex, meta.Size, index, meta.Properties->ProxyDestroy);
+        // Ensure we're using zeroed memory since not every component has proper default constructors
+        // and could end up using leftover garbage from memory
+        memset(ptr, 0, meta.Size);
+        meta.Properties->Construct(ptr);
+        return ptr;
+    }
+}
+
+void* EntitySystemHelpersBase::CreateComponentImmediateRaw(EntityHandle entity, ExtComponentType type)
+{
+    auto const& meta = GetComponentMeta(type);
+    if (meta.ComponentIndex == UndefinedComponent
+        || meta.Properties == nullptr
+        || meta.Properties->Construct == nullptr) {
+        return nullptr;
+    }
+
+    ComponentFrameStorageIndex index;
+    void* ptr;
+    auto iwc = GetEntityWorld()->Cache;
+    if (iwc->PrepareAddComponent(entity, meta.ComponentIndex, ptr)) {
+        if (meta.IsProxy) {
+            auto comp = (void**)ptr;
+            *comp = GameAllocRaw(meta.Size);
+            memset(*comp, 0, meta.Size);
+            meta.Properties->Construct(*comp);
+            return *comp;
+        } else {
+            // Ensure we're using zeroed memory since not every component has proper default constructors
+            // and could end up using leftover garbage from memory
+            memset(ptr, 0, meta.Size);
+            meta.Properties->Construct(ptr);
+            return ptr;
+        }
+
+        iwc->FinalizeAddComponent(entity, meta.ComponentIndex, ptr);
+    }
+
+    return nullptr;
+}
+
+bool EntitySystemHelpersBase::RemoveComponent(EntityHandle entity, ExtComponentType type)
+{
+    auto const& meta = GetComponentMeta(type);
+    if (meta.ComponentIndex == UndefinedComponent
+        || meta.Properties == nullptr) {
+        return false;
+    }
+
+    if (meta.IsProxy) {
+        GetEntityWorld()->Deferred()->RemoveComponent(entity, meta.ComponentIndex, sizeof(void*), meta.Properties->ProxyDestroy);
+    } else {
+        GetEntityWorld()->Deferred()->RemoveComponent(entity, meta.ComponentIndex, meta.Size, meta.Properties->ProxyDestroy);
+    }
+
+    return true;
 }
 
 BitSet<>* EntitySystemHelpersBase::GetReplicationFlags(EntityHandle const& entity, ExtComponentType type)
@@ -850,7 +1036,7 @@ void EntitySystemHelpersBase::UpdateComponentMappings()
     DEBUG_IDX("-------------------------------------------------------");
 #endif
 
-    #define T(cls) MapComponentIndices(cls::EngineClass, cls::ComponentType, sizeof(cls), std::is_base_of_v<BaseProxyComponent, cls> || cls::ForceProxy);
+    #define T(cls) MapComponentIndices(cls::EngineClass, cls::ComponentType, sizeof(cls), IsProxyComponentType<cls>, cls::OneFrame);
     #include <GameDefinitions/Components/AllComponentTypes.inl>
     #undef T
 
@@ -875,12 +1061,13 @@ void EntitySystemHelpersBase::ValidatePropertyMapBindings()
     }
 }
 
-void EntitySystemHelpersBase::MapComponentIndices(char const* componentName, ExtComponentType type, std::size_t size, bool isProxy)
+void EntitySystemHelpersBase::MapComponentIndices(char const* componentName, ExtComponentType type, std::size_t size, bool isProxy, bool oneFrame)
 {
     auto it = componentNameToIndexMappings_.find(componentName);
     if (it != componentNameToIndexMappings_.end()) {
-        components_[(unsigned)type].ComponentIndex = it->second.ComponentIndex;
-        components_[(unsigned)type].ReplicationIndex = it->second.ReplicationIndex;
+        auto& comp = components_[(unsigned)type];
+        comp.ComponentIndex = it->second.ComponentIndex;
+        comp.ReplicationIndex = it->second.ReplicationIndex;
 
         if (it->second.ComponentIndex != UndefinedComponent) {
             auto& binding = ecsComponentData_.GetOrAdd(it->second.ComponentIndex);
@@ -897,8 +1084,9 @@ void EntitySystemHelpersBase::MapComponentIndices(char const* componentName, Ext
         }
 
         se_assert(size < 0x10000);
-        components_[(unsigned)type].Size = (uint16_t)size;
-        components_[(unsigned)type].IsProxy = isProxy;
+        comp.Size = (uint16_t)size;
+        comp.IsProxy = isProxy;
+        comp.OneFrame = oneFrame;
     } else {
         OsiWarn("Could not find index for component: " << componentName);
     }
@@ -956,6 +1144,36 @@ void* EntitySystemHelpersBase::GetRawComponent(EntityHandle entityHandle, ExtCom
         return world->GetRawComponent(entityHandle, meta.ComponentIndex, meta.Size, meta.IsProxy);
     } else {
         return nullptr;
+    }
+}
+
+bool EntitySystemHelpersBase::MarkComponentAsChanged(EntityHandle entityHandle, ExtComponentType type)
+{
+    auto world = GetEntityWorld();
+    if (!world) {
+        return false;
+    }
+
+    auto const& meta = GetComponentMeta(type);
+    if (meta.ComponentIndex != UndefinedComponent) {
+        return world->MarkComponentAsChanged(entityHandle, meta.ComponentIndex);
+    } else {
+        return false;
+    }
+}
+
+bool EntitySystemHelpersBase::WasComponentChanged(EntityHandle entityHandle, ExtComponentType type)
+{
+    auto world = GetEntityWorld();
+    if (!world) {
+        return false;
+    }
+
+    auto const& meta = GetComponentMeta(type);
+    if (meta.ComponentIndex != UndefinedComponent) {
+        return world->WasComponentChanged(entityHandle, meta.ComponentIndex);
+    } else {
+        return false;
     }
 }
 
@@ -1221,11 +1439,6 @@ void EntitySystemHelpersBase::ValidateMappedComponentSizes()
             if (!ValidateMappedComponentSize(world, componentType, ExtComponentType{ componentIdx })) {
                 deletions.push_back(componentType);
             }
-
-            auto registryEntry = world->ComponentRegistry_.Get(componentType);
-            if (registryEntry) {
-                components_[componentIdx].OneFrame = registryEntry->OneFrame;
-            }
         }
     }
 
@@ -1245,6 +1458,11 @@ bool EntitySystemHelpersBase::ValidateMappedComponentSize(ecs::EntityWorld* worl
     auto const& local = components_[(unsigned)extType];
     auto name = ecsComponentData_.Get(typeId).Name;
     if (mapped != nullptr) {
+        if (!local.Properties) {
+            WARN("[ECS INTEGRITY CHECK] '%s' has no property map", name->c_str());
+            return false;
+        }
+
         if (local.IsProxy) {
             if (mapped->InlineSize != sizeof(void*)) {
                 ERR("[ECS INTEGRITY CHECK] '%s' marked as proxy, but entity only has inline data (%d)", 
@@ -1270,6 +1488,11 @@ bool EntitySystemHelpersBase::ValidateMappedComponentSize(ecs::EntityWorld* worl
                     name->c_str(), local.Size, mapped->ComponentSize);
                 return false;
             }
+        }
+
+        if (mapped->OneFrame != local.OneFrame) {
+            ERR("[ECS INTEGRITY CHECK] '%s' one-frame type mismatch", name->c_str());
+            return false;
         }
     }
 
@@ -1329,7 +1552,7 @@ void EntitySystemHelpersBase::ValidateEntityChanges(ImmediateWorldCache::Changes
                 auto name = ecsComponentData_.Get(componentInfo.ComponentIndex).Name;
                 auto componentSize = componentInfo.IsProxy ? sizeof(void*) : componentInfo.Size;
                 if (pool.FrameStorage.ComponentSizeInBytes != componentSize) {
-                    ERR("[ECS INTEGRITY CHECK] Component size mismatch (%s): local %d, ECS %d", name->c_str(), componentSize, pool.FrameStorage.ComponentSizeInBytes);
+                    ERR("[ECS INTEGRITY CHECK] Component size mismatch (%s): local %lld, ECS %d", name->c_str(), componentSize, pool.FrameStorage.ComponentSizeInBytes);
                 }
             }
         }

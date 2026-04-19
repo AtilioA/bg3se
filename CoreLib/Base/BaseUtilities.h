@@ -27,7 +27,7 @@
 
 BEGIN_SE()
 
-void AssertionFailed(char const* expr);
+__declspec(noinline) void AssertionFailed(char const* expr);
 
 template <class>
 // false value attached to a dependent name (for static_assert)
@@ -69,36 +69,6 @@ protected:
     //~ProtectedGameObject() = delete;
 };
 
-// Tag indicating whether a specific type should be handled as a value (by-val) 
-// or as an object via an object/array proxy (by-ref)
-template <class T>
-struct ByVal {
-    static constexpr bool Value = std::is_integral_v<T> || std::is_floating_point_v<T> || std::is_enum_v<T>;
-};
-
-template <class T>
-struct ByVal<std::optional<T>> { static constexpr bool Value = ByVal<T>::Value; };
-
-template <class T>
-constexpr bool IsByVal = ByVal<T>::Value;
-
-#define BY_VAL(cls) template<> \
-    struct ByVal<cls> { \
-        static_assert(std::is_default_constructible_v<cls>, "By-value types must be default constructible"); \
-        static constexpr bool Value = true; \
-    }
-
-
-template <class T>
-struct IsOptional { 
-    static constexpr bool Value = false;
-};
-
-template <class T>
-struct IsOptional<std::optional<T>> { 
-    static constexpr bool Value = true;
-    using ValueType = T;
-};
 
 inline constexpr uint64_t Hash(uint8_t v)
 {
@@ -137,14 +107,14 @@ inline constexpr uint64_t Hash(float v)
     return (uint32_t)(int32_t)v;
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_enum_v<T>, uint64_t> Hash(T v)
+template <class T> requires std::is_enum_v<T>
+inline uint64_t Hash(T v)
 {
     return Hash(std::underlying_type_t<T>(v));
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_pointer_v<T>, uint64_t> Hash(T v)
+template <class T> requires std::is_pointer_v<T>
+inline uint64_t Hash(T v)
 {
     return Hash(std::uintptr_t(v));
 }

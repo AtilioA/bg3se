@@ -8,8 +8,8 @@ inline void push(lua_State* L, nullptr_t v)
 }
 
 // Prevent implicit typecast to bool from pointer types
-template <class T>
-inline typename std::enable_if_t<std::is_same_v<T, bool>, void> push(lua_State* L, T v)
+template <class T> requires std::same_as<T, bool>
+inline void push(lua_State* L, T v)
 {
     lua_pushboolean(L, v ? 1 : 0);
 }
@@ -117,6 +117,7 @@ void push(lua_State* L, TypeInformationRef const& h);
 void push(lua_State* L, stats::ConditionId const& h);
 void push(lua_State* L, StatsExpressionRef const& h);
 void push(lua_State* L, ImguiHandle const& h);
+void push(lua_State* L, EntityOrVec3Variant const& h);
 void push(lua_State* L, extui::Renderable* o);
 
 inline void push(lua_State* L, lua_CFunction v)
@@ -140,6 +141,7 @@ inline void push(lua_State* L, UserId const& v)
 }
 
 void push(lua_State* L, glm::ivec2 const& v);
+void push(lua_State* L, glm::ivec3 const& v);
 void push(lua_State* L, glm::ivec4 const& v);
 void push(lua_State* L, glm::vec2 const& v);
 void push(lua_State* L, glm::vec3 const& v);
@@ -222,15 +224,17 @@ inline void push(lua_State* L, Noesis::Vector3 const& v)
     push(L, glm::vec3(v.x, v.y, v.z));
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_enum_v<T>, void> push(lua_State* L, T v)
+template <class T> requires std::is_enum_v<T>
+inline void push(lua_State* L, T v)
 {
     if constexpr (IsIntegralAlias<T>) {
         push(L, static_cast<EnumUnderlyingType>(v));
-    } else if constexpr (IsBitfieldV<T>) {
-        push_bitfield_value(L, static_cast<EnumUnderlyingType>(v), BitfieldID<T>::ID);
+    } else if constexpr (IsBitfield<T>) {
+        push_bitfield_value(L, static_cast<EnumUnderlyingType>(v), BitfieldID<T>);
+    } else if constexpr (IsEnum<T>) {
+        push_enum_value(L, static_cast<EnumUnderlyingType>(v), EnumID<T>);
     } else {
-        push_enum_value(L, static_cast<EnumUnderlyingType>(v), EnumID<T>::ID);
+        static_assert(false, "Unsupported enumeration type");
     }
 }
 
@@ -270,6 +274,14 @@ inline void push(lua_State* L, glm::ivec2 const& v)
     lua_createtable(L, 2, 0);
     settable(L, 1, v.x);
     settable(L, 2, v.y);
+}
+
+inline void push(lua_State* L, glm::ivec3 const& v)
+{
+    lua_createtable(L, 3, 0);
+    settable(L, 1, v.x);
+    settable(L, 2, v.y);
+    settable(L, 3, v.z);
 }
 
 inline void push(lua_State* L, glm::ivec4 const& v)

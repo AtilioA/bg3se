@@ -1,5 +1,7 @@
 #include <stdafx.h>
 
+#include <GameDefinitions/Generated/PropertyMapMeta.h>
+#include <GameDefinitions/Generated/EnumerationMeta.h>
 #include <Lua/Shared/Proxies/PropertyMapDependencies.h>
 
 BEGIN_SE()
@@ -28,42 +30,76 @@ void AddFunctionSignature(TypeInformation& ty, char const* method, Fun f)
     ty.Methods.insert(std::make_pair(FixedString(method), sig));
 }
 
+__declspec(noinline) TypeInformation& RegisterClassDefn(char const* typeName, char const* nativeName, lua::GenericPropertyMap& pm, char const* component, char const* system)
+{
+    auto& ty = TypeInformationRepository::GetInstance().RegisterType(FixedString(typeName));
+    ty.Kind = LuaTypeId::Object;
+    ty.NativeName = FixedString(nativeName);
+    ty.PropertyMap = &pm;
+    if (component) {
+        ty.ComponentName = FixedString(component);
+    }
+    if (system) {
+        ty.SystemName = FixedString(system);
+    }
+    ty.PropertyMap->TypeInfo = &ty;
+    se_assert(FixedString(typeName) == ty.PropertyMap->Name);
+    return ty;
+}
+
+__declspec(noinline) void FinalizeClassDefn(TypeInformation& ty, StructTypeId structId)
+{
+    gStaticTypeInformationRepository.RegisterStruct(ty, structId);
+}
+
+template <class T>
+inline constexpr char const* GetStaticComponentName()
+{
+    if constexpr (IsComponentType<T>) {
+        return T::ComponentName;
+    } else {
+        return nullptr;
+    }
+}
+
+template <class T>
+inline constexpr char const* GetStaticSystemName()
+{
+    if constexpr (std::is_base_of_v<BaseSystem, T> && !std::is_same_v<BaseSystem, T>) {
+        return T::SystemName;
+    } else {
+        return nullptr;
+    }
+}
+
 void RegisterObjectProxyTypeInformation()
 {
+    gStaticTypeInformationRepository.Initialize(StructRegistrySize, EnumTypeRegistrySize, BitmaskTypeRegistrySize);
+
 #define GENERATING_TYPE_INFO
 #define ADD_TYPE(prop, type) ty.Members.insert(std::make_pair(FixedString(prop), GetTypeInfoRef<type>()));
 
 #define BEGIN_CLS_TN(clsName, typeName, id) ([]() { \
     using TClass = clsName;\
-    auto& ty = TypeInformationRepository::GetInstance().RegisterType(FixedString(#typeName)); \
-    ty.Kind = LuaTypeId::Object; \
-    ty.NativeName = FixedString(typeid(TClass).name()); \
-    ty.PropertyMap = &lua::GetStaticPropertyMap<TClass>(); \
-    if constexpr (IsComponentType<TClass>) { \
-        ty.ComponentName = FixedString(TClass::ComponentName); \
-    } \
-    if constexpr (std::is_base_of_v<BaseSystem, TClass> && !std::is_same_v<BaseSystem, TClass>) { \
-        ty.SystemName = FixedString(TClass::SystemName); \
-    } \
-    ty.PropertyMap->TypeInfo = &ty; \
-    se_assert(FixedString(#typeName) == ty.PropertyMap->Name);
+    auto& ty = RegisterClassDefn(#typeName, typeid(TClass).name(), lua::GetStaticPropertyMap<TClass>(), \
+        GetStaticComponentName<TClass>(), GetStaticSystemName<TClass>());
 
 #define BEGIN_CLS(clsName, id) BEGIN_CLS_TN(clsName, clsName, id)
 
-#define END_CLS() GetStaticTypeInfo(Overload<TClass>{}).Type = &ty; })();
+#define END_CLS() FinalizeClassDefn(ty, StructID<TClass>); })();
 #define INHERIT(base) ty.ParentType = GetTypeInfoRef<base>();
-#define P(prop) ty.Members.insert(std::make_pair(FixedString(#prop), GetTypeInfoRef<decltype(TClass::prop)>()));
-#define P_NOTIFY(prop, notification) ty.Members.insert(std::make_pair(FixedString(#prop), GetTypeInfoRef<decltype(TClass::prop)>()));
-#define P_RENAMED(prop, oldName) ty.Members.insert(std::make_pair(FixedString(#prop), GetTypeInfoRef<decltype(TClass::prop)>())); \
-    ty.Members.insert(std::make_pair(FixedString(#oldName), GetTypeInfoRef<decltype(TClass::prop)>()));
-#define P_RO(prop) ty.Members.insert(std::make_pair(FixedString(#prop), GetTypeInfoRef<decltype(TClass::prop)>()));
+#define P(prop) ty.AddMember(#prop, std::move(GetTypeInfoRef<decltype(TClass::prop)>()));
+#define P_NOTIFY(prop, notification) ty.AddMember(#prop, std::move(GetTypeInfoRef<decltype(TClass::prop)>()));
+#define P_RENAMED(prop, oldName) ty.AddMember(#prop, std::move(GetTypeInfoRef<decltype(TClass::prop)>())); \
+    ty.AddMember(#oldName, std::move(GetTypeInfoRef<decltype(TClass::prop)>()));
+#define P_RO(prop) ty.AddMember(#prop, std::move(GetTypeInfoRef<decltype(TClass::prop)>()));
 #define P_BITMASK(prop) AddBitfieldTypeInfo<decltype(TClass::prop)>(ty);
 #define P_BITMASK_GETTER_SETTER(prop, getter, setter) AddBitfieldTypeInfo<decltype(TClass::prop)>(ty);
-#define PN(name, prop) ty.Members.insert(std::make_pair(FixedString(#name), GetTypeInfoRef<decltype(TClass::prop)>()));
-#define PN_RO(name, prop) ty.Members.insert(std::make_pair(FixedString(#name), GetTypeInfoRef<decltype(TClass::prop)>()));
-#define P_GETTER(prop, fun) ty.Members.insert(std::make_pair(FixedString(#prop), GetTypeInfoRef<decltype(GetFunctionReturnType(&TClass::fun))>()));
-#define P_FREE_GETTER(prop, fun) ty.Members.insert(std::make_pair(FixedString(#prop), GetTypeInfoRef<decltype(GetFunctionReturnType(&fun))>()));
-#define P_GETTER_SETTER(prop, getter, setter) ty.Members.insert(std::make_pair(FixedString(#prop), GetTypeInfoRef<decltype(GetFunctionReturnType(&TClass::getter))>()));
+#define PN(name, prop) ty.AddMember(#name, std::move(GetTypeInfoRef<decltype(TClass::prop)>()));
+#define PN_RO(name, prop) ty.AddMember(#name, std::move(GetTypeInfoRef<decltype(TClass::prop)>()));
+#define P_GETTER(prop, fun) ty.AddMember(#prop, std::move(GetTypeInfoRef<decltype(GetFunctionReturnType(&TClass::fun))>()));
+#define P_FREE_GETTER(prop, fun) ty.AddMember(#prop, std::move(GetTypeInfoRef<decltype(GetFunctionReturnType(&fun))>()));
+#define P_GETTER_SETTER(prop, getter, setter) ty.AddMember(#prop, std::move(GetTypeInfoRef<decltype(GetFunctionReturnType(&TClass::getter))>()));
 #define P_FUN(prop, fun) AddFunctionSignature(ty, #prop, &fun);
 #define P_FALLBACK(getter, setter, next) ty.HasWildcardProperties = true;
 

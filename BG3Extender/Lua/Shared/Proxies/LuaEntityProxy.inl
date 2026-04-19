@@ -79,15 +79,30 @@ EntityHelper EntityProxyMetatable::GetHelper(lua_State* L, int index)
     return EntityHelper(Get(L, index), GetEntitySystem(L));
 }
 
+UserReturn EntityProxyMetatable::CreateComponentImmediate(lua_State* L, EntityHandle entity, ExtComponentType component)
+{
+    auto ecs = GetEntitySystem(L);
+    auto ptr = ecs->CreateComponentImmediateRaw(entity, component);
+
+    if (ptr != nullptr) {
+        auto pm = ecs->GetComponentMeta(component).Properties;
+        PushComponent(L, ptr, *pm, GetCurrentLifetime(L));
+        return 1;
+    }
+
+    OsiError("Unable to construct components of this type: " << component);
+    push(L, nullptr);
+    return 1;
+}
+
 UserReturn EntityProxyMetatable::CreateComponent(lua_State* L, EntityHandle entity, ExtComponentType component)
 {
     auto ecs = GetEntitySystem(L);
-    auto typeId = *ecs->GetComponentIndex(component);
-    auto ops = ecs->GetEntityWorld()->ComponentOps.Get(typeId);
+    auto ptr = ecs->CreateComponentRaw(entity, component);
 
-    if (ops != nullptr) {
-        ops->AddImmediateDefaultComponent(entity.Handle, 0);
-        PushComponent(L, ecs, entity, component, GetCurrentLifetime(L));
+    if (ptr != nullptr) {
+        auto pm = ecs->GetComponentMeta(component).Properties;
+        PushComponent(L, ptr, *pm, GetCurrentLifetime(L));
         return 1;
     }
 
@@ -97,6 +112,11 @@ UserReturn EntityProxyMetatable::CreateComponent(lua_State* L, EntityHandle enti
 }
 
 bool EntityProxyMetatable::RemoveComponent(lua_State* L, EntityHandle entity, ExtComponentType component)
+{
+    return GetEntitySystem(L)->RemoveComponent(entity, component);
+}
+
+bool EntityProxyMetatable::RemoveComponentImmediate(lua_State* L, EntityHandle entity, ExtComponentType component)
 {
     auto ecs = GetEntitySystem(L);
     auto typeId = *ecs->GetComponentIndex(component);
@@ -177,7 +197,12 @@ void EnumerateComponents(ecs::EntitySystemHelpersBase* ecs, EntityHandle entity,
                 if (extType) {
                     auto component = changes->GetComponentChange(comp.ComponentTypeId, comp.Index);
                     if (component) {
-                        f(ecs, *extType, component);
+                        auto const& meta = ecs->GetComponentMeta(*extType);
+                        if (meta.IsProxy) {
+                            f(ecs, *extType, *(void**)component);
+                        } else {
+                            f(ecs, *extType, component);
+                        }
                     }
                 } else if (warnOnMissing) {
                     auto name = ecs->GetComponentName(comp.ComponentTypeId);
@@ -303,6 +328,18 @@ void EntityProxyMetatable::Replicate(lua_State* L, EntityHandle entity, ExtCompo
     ReplicateComponent(L, entity, component, 0, 0xffffffffffffffffull);
 }
 
+bool EntityProxyMetatable::MarkChanged(lua_State* L, EntityHandle entity, ExtComponentType component)
+{
+    auto ecs = State::FromLua(L)->GetEntitySystemHelpers();
+    return ecs->MarkComponentAsChanged(entity, component);
+}
+
+bool EntityProxyMetatable::WasChanged(lua_State* L, EntityHandle entity, ExtComponentType component)
+{
+    auto ecs = State::FromLua(L)->GetEntitySystemHelpers();
+    return ecs->WasComponentChanged(entity, component);
+}
+
 LuaEntitySubscriptionId EntityProxyMetatable::OnCreate(lua_State* L, EntityHandle entity, ExtComponentType component, 
     FunctionRef func, std::optional<bool> deferred, std::optional<bool> once)
 {
@@ -369,7 +406,9 @@ std::optional<LuaEntitySubscriptionId> EntityProxyMetatable::OnChanged(lua_State
 void EntityProxyMetatable::StaticInitialize()
 {
     ADD_FUNC(CreateComponent);
+    ADD_FUNC(CreateComponentImmediate);
     ADD_FUNC(RemoveComponent);
+    ADD_FUNC(RemoveComponentImmediate);
     ADD_FUNC(GetComponent);
     ADD_FUNC(HasRawComponent);
     ADD_FUNC(GetAllComponents);
@@ -381,6 +420,8 @@ void EntityProxyMetatable::StaticInitialize()
     ADD_FUNC(GetReplicationFlags);
     ADD_FUNC(SetReplicationFlags);
     ADD_FUNC(Replicate);
+    ADD_FUNC(MarkChanged);
+    ADD_FUNC(WasChanged);
 
     ADD_FUNC(OnCreate);
     ADD_FUNC(OnCreateDeferred);

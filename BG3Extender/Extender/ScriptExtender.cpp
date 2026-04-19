@@ -150,7 +150,7 @@ void ScriptExtender::Initialize()
 
     auto initEnd = std::chrono::high_resolution_clock::now();
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(initEnd - initStart).count();
-    DEBUG("Library startup took %d ms", ms);
+    DEBUG("Library startup took %lld ms", ms);
 
     auto app = GetStaticSymbols().AppInstance;
     if (app && *app) {
@@ -250,7 +250,7 @@ void ScriptExtender::OnStatsLoadGuarded(stats::RPGStats::LoadProc* wrapped, stat
 
     statLoadOrderHelper_.OnLoadStarted();
     client_.LoadExtensionState(ExtensionStateContext::Load);
-    
+
     {
         ecl::LuaClientPin lua(client_.GetExtensionState());
         if (lua) {
@@ -376,10 +376,11 @@ ExtensionStateBase* ScriptExtender::GetCurrentExtensionState()
         if (client_.HasExtensionState()) {
             return &client_.GetExtensionState();
         } else {
+            ERR("GetCurrentExtensionState() called from client thread %d, but no client state is available!", GetCurrentThreadId());
             return nullptr;
         }
     } else {
-        ERR("Called from thread %d that is not bound to any context!", GetCurrentThreadId());
+        ERR("GetCurrentExtensionState() called from thread %d that is not bound to any context!", GetCurrentThreadId());
         if (client_.HasExtensionState()) {
             return &client_.GetExtensionState();
         } else {
@@ -558,9 +559,10 @@ void ScriptExtender::PostStartup()
     std::lock_guard _(globalStateLock_);
     // We need to initialize the function library here, as GlobalAllocator isn't available in Init().
     if (Libraries.PostStartupFindLibraries()) {
-        lua::RegisterLibraries();
         lua::InitObjectProxyPropertyMaps();
         TypeInformationRepository::GetInstance().Initialize();
+        lua::RegisterLibraries();
+        TypeInformationRepository::GetInstance().Finalize();
 
         // Jank workaround to game bug where the reference count for FixedString 0 (the "Cast" key)
         // gets erroneously decremented during module load.

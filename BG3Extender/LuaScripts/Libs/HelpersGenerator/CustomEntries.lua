@@ -8,6 +8,13 @@ local SubscribableEventType = [[--- @class SubscribableEvent<T>:{ (Subscribe:fun
 ]]
 return {
     Specific = {SubscribableEventType = SubscribableEventType},
+
+    Builtins = {
+[[
+--- @alias FunctionRef function
+]]
+    },
+
     Misc = {
 [[--#region Extender Functions / Globals
 
@@ -43,15 +50,15 @@ _P = Ext.Utils.Print
 
 --- Console window helper to get current player character 
 --- This is the host on the server, or the hotbar character on the client  
---- @return EsvCharacter|EclCharacter
+--- @return EntityHandle
 _C = function() end
 
 --- Console window helper to get character being examined on the client-side  
---- @return EclCharacter
+--- @return EntityHandle
 _E = function() end
 
 --- Console window helper to get the host's equipped weapon on the server-side  
---- @return EsvItem
+--- @return EntityHandle
 _W = function() end
 
 --- Helper for dumping variables to the console  
@@ -80,15 +87,24 @@ function Ext.RegisterConsoleCommand(cmd, handler) end
     Entity = [[
 --- @class EntityHandle
 --- @field CreateComponent fun(self:EntityHandle, type:ExtComponentType):BaseComponent
+--- @field RemoveComponent fun(self:EntityHandle, type:ExtComponentType)
 --- @field GetComponent fun(self:EntityHandle, type:ExtComponentType):BaseComponent
+--- @field HasRawComponent fun(self:EntityHandle, type:string):boolean
 --- @field GetAllComponents fun(self:EntityHandle, warnOnMissing:boolean?):table<ExtComponentType,BaseComponent>
---- @field GetAllComponentNames fun(self:EntityHandle, mapped:boolean?):table<number,string>
---- @field GetEntityType fun(self:EntityHandle):number
---- @field GetSalt fun(self:EntityHandle):number
---- @field GetIndex fun(self:EntityHandle):number
+--- @field GetAllComponentNames fun(self:EntityHandle, requireMapped:boolean?):table<number,string>
 --- @field IsAlive fun(self:EntityHandle):boolean
+--- @field GetNetId fun(self:EntityHandle):number?
 --- @field GetReplicationFlags fun(self:EntityHandle, type:ExtComponentType, qword:number?):number
 --- @field SetReplicationFlags fun(self:EntityHandle, type:ExtComponentType, flags:number, qword:number?)
 --- @field Replicate fun(self:EntityHandle, type:ExtComponentType)
+--- @field OnCreate fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef, deferred:boolean?, once: boolean?):number
+--- @field OnCreateDeferred fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef):number
+--- @field OnCreateOnce fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef):number
+--- @field OnCreateDeferredOnce fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef):number
+--- @field OnDestroy fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef, deferred:boolean?, once: boolean?):number
+--- @field OnDestroyDeferred fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef):number
+--- @field OnDestroyOnce fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef):number
+--- @field OnDestroyDeferredOnce fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef):number
+--- @field OnChanged fun(self:EntityHandle, type:ExtComponentType, callback:FunctionRef, flags:number?):number?
 --- @field Vars table User variables registered using Ext.Vars]]
 }

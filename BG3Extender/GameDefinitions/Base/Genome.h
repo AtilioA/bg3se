@@ -50,11 +50,11 @@ public:
 
     GenomeVariant();
     GenomeVariant(lua_State* L, int index);
-    GenomeVariant(GenomeVariant&&);
+    GenomeVariant(GenomeVariant&&) noexcept;
     GenomeVariant(GenomeVariant const&);
     ~GenomeVariant();
     GenomeVariant& operator = (GenomeVariant const&);
-    GenomeVariant& operator = (GenomeVariant&&);
+    GenomeVariant& operator = (GenomeVariant&&) noexcept;
 
     bool operator == (GenomeVariant const& o) const;
 
@@ -92,7 +92,7 @@ public:
         if (sizeof(T) <= sizeof(Value)) {
             return *reinterpret_cast<T const*>(&Value);
         } else {
-            return *reinterpret_cast<T const*>(Value);
+            return *static_cast<T const*>(Value);
         }
     }
 
@@ -104,13 +104,15 @@ template <class T>
 struct [[bg3::hidden]] TGenomeSet
 {
 public:
+    using value_type = T;
+
     TGenomeSet()
     {
         IsOwned = true;
         Values = GameAlloc<TrackedCompactSet<T>>();
     }
 
-    TGenomeSet(TGenomeSet&& o)
+    TGenomeSet(TGenomeSet&& o) noexcept
     {
         IsOwned = o.IsOwned;
         Values = o.Values;
@@ -127,7 +129,7 @@ public:
         }
     }
 
-    TGenomeSet& operator = (TGenomeSet&& o)
+    TGenomeSet& operator = (TGenomeSet&& o) noexcept
     {
         Release();
         IsOwned = o.IsOwned;
@@ -207,6 +209,16 @@ public:
         if (index < Values->size()) {
             o.SetValue<T>((*Values)[index]);
         }
+    }
+
+    inline T const& operator [] (uint32_t index) const
+    {
+        return (*Values)[index];
+    }
+
+    inline T& operator [] (uint32_t index)
+    {
+        return (*Values)[index];
     }
 
     virtual uint32_t GetTypeHash() const

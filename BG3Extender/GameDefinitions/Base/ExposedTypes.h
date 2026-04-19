@@ -18,7 +18,7 @@ struct ActionOriginator
     FixedString PassiveId;
     FixedString StatusId;
     FixedString InterruptId;
-    bool CanApplyConcentration{ false };
+    bool CanApplyConcentration{ true };
 };
 
 struct SpellMetaId
@@ -110,7 +110,7 @@ struct PathSettings
 
 struct TextLine : TranslatedString
 {
-    bool field_10{ false };
+    uint8_t field_10{ 1 };
 };
 
 struct TemplateInfo
@@ -127,24 +127,24 @@ struct Bezier3Trajectory
 {
     float DistanceMin;
     float DistanceMax;
-    float OffsetMin[2];
-    float OffsetMax[2];
-    float ShiftMin;
-    float ShiftMax;
+    std::array<float, 2> OffsetMin;
+    std::array<float, 2> OffsetMax;
+    float ShiftMin{ .5f };
+    float ShiftMax{ .5f };
 };
 
 struct Bezier4Trajectory
 {
     float DistanceMin;
     float DistanceMax;
-    float OffsetAMin[2];
-    float OffsetAMax[2];
-    float OffsetBMin[2];
-    float OffsetBMax[2];
-    float ShiftAMin;
-    float ShiftAMax;
-    float ShiftBMin;
-    float ShiftBMax;
+    std::array<float, 2> OffsetAMin;
+    std::array<float, 2> OffsetAMax;
+    std::array<float, 2> OffsetBMin;
+    std::array<float, 2> OffsetBMax;
+    float ShiftAMin{ .5f };
+    float ShiftAMax{ .5f };
+    float ShiftBMin{ .5f };
+    float ShiftBMax{ .5f };
 };
 
 struct ConstantVelocity
@@ -165,10 +165,10 @@ struct MappedVelocity
 
 struct Settings
 {
-    std::variant<Bezier3Trajectory, Bezier4Trajectory> Trajectory;
+    std::variant<Bezier3Trajectory, Bezier4Trajectory> Trajectory{ Bezier3Trajectory{} };
     [[bg3::hidden]] uint32_t _Pad;
-    PathRotateMode RotateMode{ PathRotateMode::Static };
-    std::variant<ConstantVelocity, LinearVelocity, MappedVelocity> Velocity;
+    PathRotateMode RotateMode{ PathRotateMode::Follow };
+    std::variant<ConstantVelocity, LinearVelocity, MappedVelocity> Velocity{ ConstantVelocity{} };
 };
 
 struct PathMover : public Settings
@@ -177,7 +177,7 @@ struct PathMover : public Settings
     glm::quat SourceRotation;
     glm::vec3 TargetPosition;
     glm::quat TargetRotation;
-    float InterpolateValue;
+    float InterpolateValue{ .0f };
     std::array<float, 32> ComputedTrajectoryValues;
     Array<glm::vec3> ComputedVelocityValues;
     bool Initialized{ false };
@@ -207,6 +207,16 @@ struct TargetInfo
     EntityHandle PickupEntity;
     std::optional<glm::vec3> PickupPosition;
     uint8_t WeightFuncType;
+};
+
+END_NS()
+
+BEGIN_NS(aio)
+
+struct Priority
+{
+    int field_0{ 1 };
+    float field_4{ .0f };
 };
 
 END_NS()

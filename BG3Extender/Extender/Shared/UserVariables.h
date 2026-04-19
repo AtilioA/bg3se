@@ -50,11 +50,6 @@ enum class UserVariableFlags
     Persistent = 1 << 9
 };
 
-template<> struct IsBitfield<UserVariableFlags>
-{
-    static const bool value = true;
-};
-
 struct UserVariablePrototype
 {
     UserVariableFlags Flags{ (UserVariableFlags)0 };
@@ -210,7 +205,7 @@ private:
     Guid moduleUuid_;
     VariableMap vars_;
     HashMap<FixedString, UserVariablePrototype> prototypes_;
-    bool isServer_;
+    bool isServer_{ false };
 };
 
 class ModVariableManager : public UserVariableInterface

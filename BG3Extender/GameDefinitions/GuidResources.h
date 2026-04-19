@@ -143,8 +143,8 @@ struct [[bg3::hidden]] GuidResourceBankBase : ProtectedGameObject<GuidResourceBa
     virtual GuidResource const* AddLoadedObject(GuidResource&&) = 0;
     virtual bool Load(ObjectVisitor&, Array<Guid>&, bool) = 0;
     virtual FixedString const& VisitorSortKey() const = 0;
-    virtual bool Unknown48() = 0;
-    virtual bool Unknown50() = 0;
+    virtual void PostUnload() = 0;
+    virtual void PostLoad() = 0;
 
     FixedString LSXRegionName;
     FixedString LSXResourceNodeName;
@@ -156,7 +156,7 @@ struct [[bg3::hidden]] GuidResourceBank : public GuidResourceBankBase
 {
     HashMap<Guid, T> Resources;
     STDString Path;
-    LegacyRefMap<Guid, void*> field_E0;
+    LegacyRefMap<Guid, Array<T const*>> ValuesByProgressionTable;
 };
 
 
@@ -687,8 +687,8 @@ struct CharacterCreationAppearanceMaterial : public resource::GuidResource
     FixedString Name;
     TranslatedString DisplayName;
     Guid MaterialPresetUUID;
-    FixedString MaterialType;
-    FixedString MaterialType2;
+    AppearanceMaterialType MaterialType;
+    [[bg3::legacy(MaterialType2)]] FixedString MaterialTypeName;
     glm::vec4 UIColor{ .0f };
     Guid MaleRootTemplate;
     FixedString MaleCameraName;
@@ -782,7 +782,7 @@ struct CharacterCreationMaterialOverride : public resource::GuidResource
     static constexpr auto ResourceManagerType = ExtResourceManagerType::CharacterCreationMaterialOverride;
     static constexpr auto EngineClass = "eoc::CharacterCreationMaterialOverrideManager";
 
-    int32_t MaterialType{ 0 };
+    AppearanceMaterialType MaterialType;
     Guid ActiveMaterialPresetUUID;
     Guid InactiveMaterialPresetUUID;
     FixedString SourceMaterialUUID;

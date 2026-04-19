@@ -1,18 +1,12 @@
 #pragma once
 
-#include <cstdint>
+#include <GameDefinitions/Base/TypeId.h>
 
 BEGIN_SE()
-
-template <class T> struct EnumID {};
-template <class T> struct BitfieldID {};
-
 
 // Type used to store enumeration and bitfield values internally.
 // Must be a superset of all enum/bitfield types used ingame.
 using EnumUnderlyingType = uint64_t;
-using EnumTypeId = int32_t;
-using BitfieldTypeId = int32_t;
 
 
 template <class T>
@@ -23,7 +17,7 @@ struct BitfieldInfoStoreBase
     T AllowedFlags{ 0 };
     FixedString EnumName;
     FixedString LuaName;
-    int RegistryIndex{ -1 };
+    BitfieldTypeId RegistryIndex{ -1 };
 
     BitfieldInfoStoreBase(unsigned sizeHint, FixedString const& enumName, FixedString const& luaName)
     {
@@ -95,7 +89,7 @@ struct EnumInfoStoreBase
     LegacyMap<FixedString, T> Values;
     FixedString EnumName;
     FixedString LuaName;
-    int RegistryIndex{ -1 };
+    EnumTypeId RegistryIndex{ -1 };
 
     EnumInfoStoreBase(unsigned sizeHint, FixedString const& enumName, FixedString const& luaName)
     {
@@ -153,6 +147,11 @@ struct EnumRegistry
     Array<EnumInfoStore*> EnumsById;
 
     void Register(EnumInfoStore* ei, EnumTypeId id);
+
+    EnumInfoStore const* Get(EnumTypeId typeId) const
+    {
+        return EnumsById[(uint32_t)typeId];
+    }
 };
 
 struct BitfieldRegistry
@@ -163,15 +162,21 @@ struct BitfieldRegistry
     Array<BitfieldInfoStore*> BitfieldsById;
 
     void Register(BitfieldInfoStore* ei, BitfieldTypeId id);
+
+    BitfieldInfoStore const* Get(BitfieldTypeId typeId) const
+    {
+        return BitfieldsById[(uint32_t)typeId];
+    }
 };
 
 
 template <class T>
 struct EnumInfo
 {
-    inline static EnumInfoStore& GetStore()
+    inline static EnumInfoStore const& GetStore()
     {
-        return *EnumRegistry::Get().EnumsById[EnumID<T>::ID];
+        static_assert(IsEnum<T>, "Type is not a registered enumeration");
+        return *EnumRegistry::Get().Get(EnumID<T>);
     }
 
     inline static std::optional<T> Find(FixedString const& name)
@@ -193,9 +198,10 @@ struct EnumInfo
 template <class T>
 struct BitfieldInfo
 {
-    inline static BitfieldInfoStore& GetStore()
+    inline static BitfieldInfoStore const& GetStore()
     {
-        return *BitfieldRegistry::Get().BitfieldsById[BitfieldID<T>::ID];
+        static_assert(IsBitfield<T>, "Type is not a registered bitfield");
+        return *BitfieldRegistry::Get().Get(BitfieldID<T>);
     }
 
     static std::optional<T> Find(FixedString const& name)
@@ -214,29 +220,15 @@ struct BitfieldInfo
     }
 };
 
-
-template <class T>
-struct IsBitfield {
-    static const bool value = false;
-};
-
-#define MARK_AS_BITFIELD(T) \
-    template<> struct IsBitfield<T> { \
-        static const bool value = true; \
-    };
-
-template <class T>
-constexpr bool IsBitfieldV = IsBitfield<T>::value;
-
 END_SE()
 
 
 namespace std
 {
-    template <class T>
-    inline std::enable_if_t<std::is_enum_v<T>, ostream&> operator << (ostream& out, T const& v)
+    template <class T> requires std::is_enum_v<T>
+    inline ostream& operator << (ostream& out, T const& v)
     {
-        static_assert(!bg3se::IsBitfieldV<T>, "Cannot print bitfields");
+        static_assert(!bg3se::IsBitfield<T>, "Cannot print bitfields");
         auto label = bg3se::EnumInfo<T>::Find(v);
         if (label) {
             out << label.GetString();

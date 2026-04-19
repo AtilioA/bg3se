@@ -64,6 +64,8 @@ ClientState::~ClientState()
 {
     auto & sym = GetStaticSymbols();
 
+    ecl::lua::ui::ReleasePropertyChangeHandlers(L);
+
     if (imgui_) {
         gExtender->IMGUI().SetObjects(nullptr);
         delete imgui_;

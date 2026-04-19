@@ -80,29 +80,29 @@ inline bool do_typecheck(lua_State* L, int index, Overload<OverrideableProperty<
     return do_typecheck<T>(L, index);
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_integral_v<T>, bool> do_typecheck(lua_State * L, int index, Overload<T>)
+template <class T> requires std::is_integral_v<T>
+inline bool do_typecheck(lua_State * L, int index, Overload<T>)
 {
     return lua_isinteger(L, index);
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_floating_point_v<T>, bool> do_typecheck(lua_State* L, int index, Overload<T>)
+template <class T> requires std::is_floating_point_v<T>
+inline bool do_typecheck(lua_State* L, int index, Overload<T>)
 {
     return lua_isnumber(L, index);
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_enum_v<T>, bool> do_typecheck(lua_State * L, int index, Overload<T>)
+template <class T> requires std::is_enum_v<T>
+inline bool do_typecheck(lua_State * L, int index, Overload<T>)
 {
     if constexpr (IsIntegralAlias<T>) {
         return do_typecheck(L, index, Overload<std::underlying_type_t<T>>{});
-    } else if constexpr (IsBitfieldV<T>) {
-        auto propMap = BitfieldRegistry::Get().BitfieldsById[BitfieldID<T>::ID]->RegistryIndex;
-        return lua_typecheck_cppvalue(L, index, MetatableTag::BitfieldValue, propMap);
+    } else if constexpr (IsBitfield<T>) {
+        return lua_typecheck_cppvalue(L, index, MetatableTag::BitfieldValue, (int32_t)BitfieldID<T>);
+    } else if constexpr (IsEnum<T>) {
+        return lua_typecheck_cppvalue(L, index, MetatableTag::EnumValue, (int32_t)EnumID<T>);
     } else {
-        auto propMap = EnumRegistry::Get().EnumsById[EnumID<T>::ID]->RegistryIndex;
-        return lua_typecheck_cppvalue(L, index, MetatableTag::EnumValue, propMap);
+        static_assert(false, "Unsupported enumeration type");
     }
 }
 
@@ -153,6 +153,11 @@ inline bool do_typecheck_array(lua_State* L, int index)
 inline bool do_typecheck(lua_State* L, int index, Overload<glm::ivec2>)
 {    
     return do_typecheck_array<int32_t, 2>(L, index);
+}
+
+inline bool do_typecheck(lua_State* L, int index, Overload<glm::ivec3>)
+{    
+    return do_typecheck_array<int32_t, 3>(L, index);
 }
 
 inline bool do_typecheck(lua_State* L, int index, Overload<glm::i16vec2>)
@@ -231,6 +236,13 @@ inline bool do_typecheck(lua_State* L, int index, Overload<AnyRef>)
 
 TYPECHECK(FunctionRef, LUA_TFUNCTION)
 TYPECHECK(AnyUserdataRef, LUA_TLIGHTCPPOBJECT)
+
+
+template <class T> requires !IsByVal<T> && !std::is_pointer_v<T>
+bool do_typecheck(lua_State* L, int index, Overload<T>);
+
+template <class T> requires !IsByVal<T> && std::is_pointer_v<T>
+bool do_typecheck(lua_State* L, int index, Overload<T>);
 
 template <class T>
 inline bool do_typecheck(lua_State* L, int index, Overload<std::optional<T>>)

@@ -79,6 +79,25 @@ struct DownedComponent : public BaseComponent
     Guid Entity;
 };
 
+struct DeadReckoningComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(DeadReckoning, "eoc::DeadReckoningComponent")
+
+    float MovementAcceleration;
+    float DistanceXZ;
+    float field_8;
+    float SpeedMultiplier;
+};
+
+struct DeadReckoningSyncComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(DeadReckoningSync, "eoc::DeadReckoningSyncComponent")
+
+    glm::vec3 Position;
+    float Speed;
+    float Speed2;
+};
+
 END_NS()
 
 
@@ -147,7 +166,7 @@ struct DeathDeadByDefaultRequestOneFrameComponent : public BaseComponent
 
 struct DeathRequestOneFrameComponent : public BaseComponent
 {
-    DEFINE_ONEFRAME_COMPONENT(ServerDeathRequest, "esv::death::DeathRequestOneFrameComponent")
+    DEFINE_COMPONENT(ServerDeathRequest, "esv::death::DeathRequestOneFrameComponent")
 
     EntityHandle Entity;
     bg3se::death::DeathRequestData Death;
@@ -155,7 +174,7 @@ struct DeathRequestOneFrameComponent : public BaseComponent
 
 struct ModifyDelayDeathRequestOneFrameComponent : public BaseComponent
 {
-    DEFINE_ONEFRAME_COMPONENT(ServerModifyDelayDeathRequest, "esv::death::ModifyDelayDeathRequestOneFrameComponent")
+    DEFINE_COMPONENT(ServerModifyDelayDeathRequest, "esv::death::ModifyDelayDeathRequestOneFrameComponent")
 
     EntityHandle Entity;
     bool Increase;
@@ -163,12 +182,12 @@ struct ModifyDelayDeathRequestOneFrameComponent : public BaseComponent
 
 struct ResurrectedEventOneFrameComponent : public BaseComponent
 {
-    DEFINE_ONEFRAME_COMPONENT(ServerResurrectedEvent, "esv::death::ResurrectedEventOneFrameComponent")
+    DEFINE_COMPONENT(ServerResurrectedEvent, "esv::death::ResurrectedEventOneFrameComponent")
 
     bg3se::death::ResurrectionData Resurrect;
 };
 
-DEFINE_ONEFRAME_TAG_COMPONENT(esv::death, DownedEventOneFrameComponent, DownedEvent)
+DEFINE_TAG_COMPONENT(esv::death, DownedEventOneFrameComponent, DownedEvent)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::death, DiedEventOneFrameComponent, DiedEvent)
 
 END_NS()

@@ -46,10 +46,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Game Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <TargetName>BG3ScriptExtender</TargetName>
+    <CodeAnalysisRuleSet>..\CodeAnalysis.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Game Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>BG3ScriptExtender</TargetName>
+    <CodeAnalysisRuleSet>..\CodeAnalysis.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Game Debug|x64'">
     <ClCompile>
@@ -170,12 +172,21 @@ $(SolutionDir)x64\Release\ResourceBundler.exe "$(ProjectDir)LuaScripts" "$(Proje
     <ClInclude Include="GameDefinitions\Base\Serialization.h" />
     <ClInclude Include="GameDefinitions\Base\BaseTypeInformation.h" />
     <ClInclude Include="GameDefinitions\Base\ForwardDeclarations.h" />
+    <ClInclude Include="GameDefinitions\Base\TypeId.h" />
+    <ClInclude Include="GameDefinitions\Base\TypeMetadata.h" />
+    <ClInclude Include="GameDefinitions\Base\WindowsSlim.h" />
     <ClInclude Include="GameDefinitions\Character.h" />
     <ClInclude Include="GameDefinitions\Base\CommonTypes.h" />
     <ClInclude Include="GameDefinitions\CharacterCreation.h" />
     <ClInclude Include="GameDefinitions\Components\ActionResources.h" />
     <ClInclude Include="GameDefinitions\Components\Death.h" />
+    <ClInclude Include="GameDefinitions\Components\Dummy.h" />
     <ClInclude Include="GameDefinitions\Components\Effect.h" />
+    <ClInclude Include="GameDefinitions\Components\Fade.h" />
+    <ClInclude Include="GameDefinitions\Components\Instancing.h" />
+    <ClInclude Include="GameDefinitions\Components\Level.h" />
+    <ClInclude Include="GameDefinitions\Components\Physics.h" />
+    <ClInclude Include="GameDefinitions\Components\Script.h" />
     <ClInclude Include="GameDefinitions\Components\Sound.h" />
     <ClInclude Include="GameDefinitions\Components\SpellCast.h" />
     <ClInclude Include="GameDefinitions\Components\SpellCastShared.h" />
@@ -223,6 +234,8 @@ $(SolutionDir)x64\Release\ResourceBundler.exe "$(ProjectDir)LuaScripts" "$(Proje
     <ClInclude Include="GameDefinitions\EntitySystemHelpers.h" />
     <ClInclude Include="GameDefinitions\EnumRepository.h" />
     <ClInclude Include="GameDefinitions\GameState.h" />
+    <ClInclude Include="GameDefinitions\Generated\EnumerationMeta.h" />
+    <ClInclude Include="GameDefinitions\Generated\PropertyMapMeta.h" />
     <ClInclude Include="GameDefinitions\GlobalFixedStrings.h" />
     <ClInclude Include="GameDefinitions\Hit.h" />
     <ClInclude Include="GameDefinitions\Input.h" />
@@ -307,7 +320,6 @@ $(SolutionDir)x64\Release\ResourceBundler.exe "$(ProjectDir)LuaScripts" "$(Proje
     <ClInclude Include="Lua\Shared\LuaModule.h" />
     <ClInclude Include="Lua\Shared\LuaStats.h" />
     <ClInclude Include="Lua\Shared\LuaTraits.h" />
-    <ClInclude Include="Lua\Shared\LuaTypeTraits.h" />
     <ClInclude Include="Lua\Shared\LuaTypeValidators.h" />
     <ClInclude Include="Lua\Shared\Proxies\LuaArrayProxy.h" />
     <ClInclude Include="Lua\Shared\Proxies\LuaBitfieldValue.h" />
@@ -451,6 +463,7 @@ $(SolutionDir)x64\Release\ResourceBundler.exe "$(ProjectDir)LuaScripts" "$(Proje
     <None Include="GameDefinitions\Components\AllSystemTypes.inl" />
     <None Include="GameDefinitions\Components\Effect.inl" />
     <None Include="GameDefinitions\Components\ExposedSystemTypes.inl" />
+    <None Include="GameDefinitions\Components\Level.inl" />
     <None Include="GameDefinitions\Components\Spell.inl" />
     <None Include="GameDefinitions\Controllers\Action.inl" />
     <None Include="GameDefinitions\Controllers\Behaviour.inl" />

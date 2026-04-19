@@ -262,15 +262,15 @@ struct [[bg3::hidden]] TextureManager
     HashMap<FixedString, TrackedTexture*> Textures;
 };
 
-struct [[bg3::hidden]] UVValues
+struct UVValues
 {
     glm::vec2 UV0;
     glm::vec2 UV1;
 };
 
-struct [[bg3::hidden]] TextureAtlas
+struct TextureAtlas : public ProtectedGameObject<TextureAtlas>
 {
-    void* VMT;
+    [[bg3::hidden]] void* VMT;
     LegacyMap<FixedString, UVValues*> Icons;
     STDString Path;
     STDString TexturePath;
@@ -282,12 +282,12 @@ struct [[bg3::hidden]] TextureAtlas
     resource::TextureResource* Texture;
 };
 
-struct [[bg3::hidden]] TextureAtlasMap
+struct TextureAtlasMap : public ProtectedGameObject<TextureAtlasMap>
 {
-    void* VMT;
+    [[bg3::hidden]] void* VMT;
     LegacyRefMap<STDString, TextureAtlas*> AtlasMap;
     LegacyMap<FixedString, TextureAtlas*> IconMap;
-    uint32_t Unknown;
+    [[bg3::hidden]] uint32_t Unknown;
 };
 
 struct [[bg3::hidden]] Bank : public ProtectedGameObject<Bank>
@@ -368,16 +368,14 @@ struct Resource : public ProtectedGameObject<Resource>
     virtual STDString* ToLogString(STDString&) = 0;
     virtual void SetUUID(FixedString const&) = 0;
     virtual void VMT18(FixedString const&) = 0;
-    virtual void Destroy(ResourceManager* mgr) = 0;
-    virtual bool Load(ResourceManager* mgr) = 0;
-    virtual bool Release(ResourceManager* mgr) = 0;
+    virtual void ForceUnload(ResourceManager* mgr) = 0;
+    virtual bool AcquireRef(ResourceManager* mgr) = 0;
+    virtual bool ReleaseRef(ResourceManager* mgr) = 0;
     virtual bool IsLoaded() = 0;
     virtual bool IsLoadFailed() = 0;
     virtual uint32_t GetType() = 0;
     virtual Resource* Clone() = 0;
     virtual bool Visit(ObjectVisitor& visitor) = 0;
-    virtual bool DoLoad(ResourceManager* mgr) = 0;
-    virtual bool DoUnload(ResourceManager* mgr) = 0;
 
     Path SourceFile;
     [[bg3::readonly]] FixedString Guid;

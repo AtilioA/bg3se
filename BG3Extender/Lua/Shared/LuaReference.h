@@ -15,8 +15,8 @@ public:
     ~GlobalRefManager();
 
     int32_t AddGlobalIndex(lua_State* L, int local);
-    void IncRef(int32_t i);
-    void DecRef(int32_t i);
+    uint32_t IncRef(int32_t i);
+    uint32_t DecRef(int32_t i);
     void Push(lua_State* L, int32_t i);
     int32_t GetGlobalIndex(int32_t i);
 
@@ -88,12 +88,13 @@ public:
     PersistentRegistryEntry(PersistentRegistryEntry&&) noexcept;
 
     PersistentRegistryEntry& operator = (PersistentRegistryEntry const &);
-    PersistentRegistryEntry& operator = (PersistentRegistryEntry&&);
+    PersistentRegistryEntry& operator = (PersistentRegistryEntry&&) noexcept;
 
     bool IsValid(lua_State* L) const;
     bool TryPush(lua_State* L) const;
     Ref ToRef(lua_State* L) const;
     void Bind(lua_State* L, Ref const& ref);
+    void Reset(lua_State* L);
 
     explicit inline operator bool() const
     {
@@ -189,3 +190,11 @@ private:
 };
 
 END_NS()
+
+BEGIN_SE()
+
+MARK_BY_VALUE_TYPE(lua::RegistryEntry)
+MARK_BY_VALUE_TYPE(lua::PersistentRegistryEntry)
+MARK_BY_VALUE_TYPE(lua::Ref)
+
+END_SE()

@@ -307,14 +307,27 @@ StatsExpressionRef do_get(lua_State* L, int index, Overload<StatsExpressionRef>)
     auto str = get<std::optional<StringView>>(L, index);
     if (str) {
         auto manager = GetStaticSymbols().eoc__DynamicStatsExpressionManager;
-        Guid hash;
-        MurmurHash3_x64_128(str->data(), (int)str->size(), 0, &hash);
+        Guid hash = StatsExpressionInternal::Hash(*str);
         return (*manager)->CreateStatsExpression(hash, *str);
     }
 
     // If it's a refcounted stats expression, reference it directly
     auto expr = get<StatsExpressionPooled*>(L, index);
     return StatsExpressionRef(expr);
+}
+
+EntityOrVec3Variant do_get(lua_State* L, int index, Overload<EntityOrVec3Variant>)
+{
+    EntityOrVec3Variant v;
+    if (lua_type(L, index) == LUA_TTABLE) {
+        v.Position = do_get(L, index, Overload<glm::vec3>{});
+        v.Type = 1;
+    } else {
+        v.Entity = do_get(L, index, Overload<EntityHandle>{});
+        v.Type = 0;
+    }
+
+    return v;
 }
 
 Ref do_get(lua_State* L, int index, Overload<Ref>)

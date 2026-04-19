@@ -224,7 +224,7 @@ struct CombatantKilledEventOneFrameComponent : public BaseComponent
 
 struct JoinEventOneFrameComponent : public BaseComponent
 {
-    DEFINE_ONEFRAME_COMPONENT(CombatantJoinEvent, "esv::combat::JoinEventOneFrameComponent")
+    DEFINE_COMPONENT(CombatantJoinEvent, "esv::combat::JoinEventOneFrameComponent")
 
     EntityHandle Combat;
     int32_t Initiative;
@@ -243,7 +243,7 @@ struct LeftEventOneFrameComponent : public BaseComponent
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::combat, CombatScheduledForDeleteOneFrameComponent, CombatScheduledForDelete)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::combat, CombatStartedEventOneFrameComponent, CombatStartedEvent)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::combat, DelayedFanfareRemovedDuringCombatEventOneFrameComponent, DelayedFanfareRemovedDuringCombatEvent)
-DEFINE_ONEFRAME_TAG_COMPONENT(esv::combat, FleeSuccessOneFrameComponent, CombatFleeSuccess)
+DEFINE_TAG_COMPONENT(esv::combat, FleeSuccessOneFrameComponent, CombatFleeSuccess)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::combat, JoinInCurrentRoundFailedEventOneFrameComponent, CombatJoinInCurrentRoundFailedEvent)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::combat, JoinInCurrentRoundOneFrameComponent, CombatJoinInCurrentRound)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::combat, RequestCompletedEventOneFrameComponent, CombatRequestCompletedEvent)
@@ -550,6 +550,13 @@ struct ModeChangedEventOneFrameComponent : public BaseComponent
     uint8_t field_9;
 };
 
+struct TurnBasedComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(FTBTurnBased, "esv::ftb::TurnBasedComponent")
+
+    uint64_t Entity;
+};
+
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::ftb, PlayersTurnEndedEventOneFrameComponent, FTBPlayersTurnEndedEvent)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::ftb, PlayersTurnStartedEventOneFrameComponent, FTBPlayersTurnStartedEvent)
 DEFINE_ONEFRAME_TAG_COMPONENT(esv::ftb, RoundEndedEventOneFrameComponent, FTBRoundEndedEvent)
@@ -580,6 +587,88 @@ struct ZoneSystem : public BaseSystem
     [[bg3::hidden]] void* ActivationManager;
     [[bg3::hidden]] void* GameControl;
     [[bg3::hidden]] void* LevelManager;
+};
+
+END_NS()
+
+BEGIN_NS(esv::combat_log)
+
+struct AutomaticDialogRequest
+{
+    EntityHandle Entity;
+    TranslatedFSString field_8;
+    uint8_t field_18;
+    uint8_t field_19;
+    uint8_t field_1A;
+};
+
+
+struct DialogStartRequest
+{
+    EntityHandle Target;
+    EntityHandle FirstSpeaker;
+};
+
+struct HealedRequest
+{
+    ActionOriginator Originator;
+    EntityHandle Cause;
+    CauseType CauseType;
+    EntityHandle Caster;
+    int32_t HealAmount;
+    StatsExpressionResolved HealAmountExpression;
+    Guid SpellCastGuid;
+};
+
+struct StatusAddedRequest
+{
+    ActionOriginator Originator;
+    int64_t field_20;
+    FixedString StatusID;
+    StatusType StatusType;
+    EntityHandle Cause;
+    CauseType CauseType;
+    EntityHandle Target;
+    SurfaceType SourceSurface;
+    Guid SpellCastGuid;
+    ConditionRolls ConditionRolls;
+};
+
+struct StatusRemovedRequest
+{
+    ActionOriginator Originator;
+    FixedString StatusID;
+    StatusType StatusType;
+    EntityHandle Target;
+    EntityHandle Source;
+    Guid SpellCastGuid;
+    ConditionRolls ConditionRolls;
+};
+
+struct StealthSpottedRequest
+{
+    EntityHandle Target;
+    EntityHandle Spotter;
+    uint8_t Obscurity;
+    CauseType CauseType;
+    FixedString Cause;
+};
+
+struct CombatLogSystem : public BaseSystem
+{
+    DEFINE_SYSTEM(ServerCombatLog, "esv::combat_log::CombatLogSystem")
+
+    [[bg3::hidden]] void* DialogEventListenerAdapter_VMT;
+    [[bg3::hidden]] void* EocServer;
+    Array<AutomaticDialogRequest> OnDialogNodeStarted;
+    Array<DialogStartRequest> OnDialogStarted;
+    Array<DialogStartRequest> field_40;
+    [[bg3::hidden]] void* SpellPrototypeManager;
+    [[bg3::hidden]] void* pICombatLogHelper;
+    Array<HealedRequest> HealedEntries;
+    Array<StatusRemovedRequest> StatusRemoved;
+    Array<StatusAddedRequest> StatusAdded;
+    Array<StealthSpottedRequest> StealthSpotted;
 };
 
 END_NS()

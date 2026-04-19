@@ -10,7 +10,7 @@ static_property_re = r'^static\s+constexpr\s+(?P<type>.+)\s+(?P<name>.+)\s*=\s*(
 typedef_re = r'^using\s+.*=.*;?$'
 attributes_re = r'^(\[\[(\s*[a-zA-Z0-9:_]+\s*(\([^)]*\))?\s*,?\s*)+\]\])$'
 attribute_re = r'(?P<name>[a-zA-Z0-9:_]+)\s*(\(\s*(?P<args>[^)]*)\s*\))?'
-property_re = r'^(?P<attributes>\[\[(\s*[a-zA-Z0-9:_]+\s*(\([^)]*\))?\s*,?\s*)+\]\])?\s*(?P<type>[a-zA-Z0-9_<>*:, ]+)\s+(?P<name>[a-zA-Z0-9_]+)\s*(?P<initval>{.*})?\s*;\s*(?P<comment>//.*)?$'
+property_re = r'^(?P<attributes>\[\[(\s*[a-zA-Z0-9:_]+\s*(\([^)]*\))?\s*,?\s*)+\]\])?\s*(?P<type>[a-zA-Z0-9_<>*:, ]+)\s+(?P<name>[a-zA-Z0-9_]+)\s*(?P<initval>{.*})?\s*;\s*$'
 tag_component_re = r'^(DEFINE_TAG_COMPONENT|DEFINE_ONEFRAME_TAG_COMPONENT)\((?P<ns>[^,]+), (?P<name>[^,]+), (?P<type>[^,]+)\)$'
 boost_re = r'^DEFN_BOOST\(\s*(?P<name>[^,]+),\s*(?P<boostType>[^,]+),\s*{$'
 ignore_re = r'^(BEGIN_SE|END_SE).*$'
@@ -290,7 +290,7 @@ class DefinitionLoader:
                 line = line.strip()
                 loader.parse_line(line)
         if len(self.ns_stack) > 0 or len(self.struct_stack) > 0 or len(self.next_attributes) > 0 or self.cur_struct is not None:
-            raise Exception("Partially parsed namespace or struct after EOF")
+            raise Exception("Partially parsed namespace or struct after EOF in file: " + path)
 
     def parse_attributes(self, line):
         if line is not None:
@@ -471,6 +471,18 @@ class DefinitionLoader:
         
         if line == '' or line[0] == '/' or line[0] == '#' or re.match(ignore_re, line) is not None:
             return
+
+        comment = line.find('//')
+        if comment != -1:
+            line = line[:comment]
+
+        comment = line.find('/*')
+        if comment != -1:
+            comment_end = line.find('*/', comment+1)
+            if comment_end == -1:
+                line = line[:comment]
+            else:
+                line = line[:comment] + line[comment_end+2:]
         
         match = re.match(ns_start_re, line)
         if match is not None:
@@ -659,16 +671,21 @@ sources = [
     'GameDefinitions/Components/Dummy.h',
     'GameDefinitions/Components/Effect.h',
     'GameDefinitions/Components/Events.h',
+    'GameDefinitions/Components/Fade.h',
     'GameDefinitions/Components/Hit.h',
     'GameDefinitions/Components/Item.h',
+    'GameDefinitions/Components/Instancing.h',
     'GameDefinitions/Components/Inventory.h',
+    'GameDefinitions/Components/Level.h',
     'GameDefinitions/Components/Visual.h',
     'GameDefinitions/Components/Passives.h',
     'GameDefinitions/Components/Party.h',
+    'GameDefinitions/Components/Physics.h',
     'GameDefinitions/Components/Progression.h',
     'GameDefinitions/Components/Projectile.h',
     'GameDefinitions/Components/Roll.h',
     'GameDefinitions/Components/Runtime.h',
+    'GameDefinitions/Components/Script.h',
     'GameDefinitions/Components/ServerData.h',
     'GameDefinitions/Components/Shapeshift.h',
     'GameDefinitions/Components/Sound.h',
@@ -751,6 +768,13 @@ try:
         cur_components = f.read()
 except FileNotFoundError:
     pass
+    
+cur_meta = ''
+try:
+    with open('GameDefinitions/Generated/PropertyMapMeta.h', 'r') as f:
+        cur_meta = f.read()
+except FileNotFoundError:
+    pass
 
 if cur_names != propmap_names + preprocessor.names:
     with open('GameDefinitions/Generated/PropertyMapNames.inl', 'w') as f:
@@ -769,3 +793,13 @@ if cur_components != component_names:
         f.write(component_names)
 else:
     print("No component changes detected")
+
+property_meta = '#pragma once\n'
+property_meta += 'BEGIN_SE()\n'
+property_meta += 'static constexpr int StructRegistrySize = ' + str(shared.next_struct_id) + ';\n'
+property_meta += 'END_SE()\n'
+if cur_meta != property_meta:
+    with open('GameDefinitions/Generated/PropertyMapMeta.h', 'w') as f:
+        f.write(property_meta)
+else:
+    print("No meta changes detected")

@@ -113,27 +113,29 @@ inline OverrideableProperty<T> do_get(lua_State* L, int index, Overload<Override
     return OverrideableProperty<T>{get<T>(L, index), true};
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_integral_v<T>, T> do_get(lua_State * L, int index, Overload<T>)
+template <class T> requires std::is_integral_v<T>
+inline T do_get(lua_State * L, int index, Overload<T>)
 {
     return (T)luaL_checkinteger(L, index);
 }
 
-template <class T>
-inline typename std::enable_if_t<std::is_floating_point_v<T>, T> do_get(lua_State* L, int index, Overload<T>)
+template <class T> requires std::is_floating_point_v<T>
+inline T do_get(lua_State* L, int index, Overload<T>)
 {
     return (T)luaL_checknumber(L, index);
 }
 
-template <class T>
-typename std::enable_if_t<std::is_enum_v<T>, T> do_get(lua_State * L, int index, Overload<T>)
+template <class T> requires std::is_enum_v<T>
+typename T do_get(lua_State * L, int index, Overload<T>)
 {
     if constexpr (IsIntegralAlias<T>) {
         return (T)do_get(L, index, Overload<std::underlying_type_t<T>>{});
-    } else if constexpr (IsBitfieldV<T>) {
-        return (T)get_bitfield_value(L, index, BitfieldID<T>::ID);
+    } else if constexpr (IsBitfield<T>) {
+        return (T)get_bitfield_value(L, index, BitfieldID<T>);
+    } else if constexpr (IsEnum<T>) {
+        return (T)get_enum_value(L, index, EnumID<T>);
     } else {
-        return (T)get_enum_value(L, index, EnumID<T>::ID);
+        static_assert(false, "Unsupported enumeration type");
     }
 }
 
@@ -189,6 +191,17 @@ inline glm::ivec2 do_get(lua_State* L, int index, Overload<glm::ivec2>)
     return val;    
 }
 
+inline glm::ivec3 do_get(lua_State* L, int index, Overload<glm::ivec3>)
+{    
+    auto i = lua_absindex(L, index);
+    glm::ivec3 val;
+    luaL_checktype(L, index, LUA_TTABLE);
+    val.x = gettable<int32_t>(L, 1, i);
+    val.y = gettable<int32_t>(L, 2, i);
+    val.z = gettable<int32_t>(L, 3, i);
+    return val;    
+}
+
 inline glm::ivec4 do_get(lua_State* L, int index, Overload<glm::ivec4>)
 {    
     auto i = lua_absindex(L, index);
@@ -227,6 +240,7 @@ StatsExpressionRef do_get(lua_State* L, int index, Overload<StatsExpressionRef>)
 // Jank, but we can't put it anywhere else for now :(
 LuaSoundObjectId do_get(lua_State* L, int index, Overload<LuaSoundObjectId>);
 gn::GenomeVariant do_get(lua_State* L, int index, Overload<gn::GenomeVariant>);
+EntityOrVec3Variant do_get(lua_State* L, int index, Overload<EntityOrVec3Variant>);
 
 inline Version do_get(lua_State* L, int index, Overload<Version>)
 {
@@ -278,11 +292,11 @@ inline typename std::optional<T> do_get(lua_State* L, int index, Overload<std::o
     }
 }
 
-template <class T>
-typename std::enable_if_t<!IsByVal<T> && !std::is_pointer_v<T>, T> do_get(lua_State* L, int index, Overload<T>);
+template <class T> requires !IsByVal<T> && !std::is_pointer_v<T>
+T do_get(lua_State* L, int index, Overload<T>);
 
-template <class T>
-typename std::enable_if_t<!IsByVal<T> && std::is_pointer_v<T>, T> do_get(lua_State* L, int index, Overload<T>);
+template <class T> requires !IsByVal<T> && std::is_pointer_v<T>
+T do_get(lua_State* L, int index, Overload<T>);
 
 // Overload helper for fetching a parameter for a Lua -> C++ function call
 template <class T>

@@ -29,9 +29,7 @@ UIEventHooks::EventHandler::EventHandler(EventHandler&& o) noexcept
     EventType(o.EventType),
     Handler(std::move(o.Handler)),
     Index(o.Index)
-{
-    o.Target.Reset();
-}
+{}
 
 UIEventHooks::EventHandler& UIEventHooks::EventHandler::operator = (EventHandler&& o) noexcept
 {
@@ -41,7 +39,6 @@ UIEventHooks::EventHandler& UIEventHooks::EventHandler::operator = (EventHandler
     Handler = std::move(o.Handler);
     Index = o.Index;
 
-    o.Target.Reset();
     return *this;
 }
 
@@ -164,5 +161,11 @@ void DeferredUIEvents::OnPropertyChanged(lua::PersistentRegistryEntry const& han
         .Property = property
     });
 }
+
+END_NS()
+
+BEGIN_NS(ecl::lua::ui)
+
+void ReleasePropertyChangeHandlers(lua_State* L);
 
 END_NS()

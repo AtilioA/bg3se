@@ -16,7 +16,6 @@ class GenericPropertyMap;
 struct RawPropertyAccessors;
 struct RawPropertyAccessorsHotData;
 
-
 inline PropertyOperationResult GenericHotDataPlaceholderGetter(lua_State* L, LifetimeHandle lifetime, void const* object, RawPropertyAccessorsHotData const& prop)
 {
     return PropertyOperationResult::NoSuchProperty;
@@ -50,60 +49,116 @@ struct RawPropertyAccessors
     }
 };
 
+void ProcessPropertyNotifications(RawPropertyAccessors const& prop, bool isWriting);
+
 struct RawPropertyAccessorsHotData
 {
+    // Position of PendingNotifications flag in get_
+    static constexpr unsigned NotificationFlagOffset = 48;
+    // Position of field offset value in get_
+    static constexpr unsigned FieldPositionOffset = 49;
+    // Position of flag value in set_
+    static constexpr unsigned FlagValueOffset = 48;
+
     inline RawPropertyAccessorsHotData()
-        : Get((uint64_t)&GenericHotDataPlaceholderGetter),
-        Set((uint64_t)&GenericHotDataPlaceholderSetter),
-        Cold(nullptr)
+        : get_((uint64_t)&GenericHotDataPlaceholderGetter),
+        set_((uint64_t)&GenericHotDataPlaceholderSetter),
+        cold_(nullptr)
+    {}
+    
+    inline RawPropertyAccessorsHotData(RawPropertyAccessorsHotData const& props)
+        : get_(props.get_.load()),
+        set_(props.set_),
+        cold_(props.cold_)
     {}
     
     inline RawPropertyAccessorsHotData(RawPropertyAccessors const& props)
-        : Get((uint64_t)props.Get
-            | (((props.PendingNotifications != PropertyNotification::None) ? 1ull : 0ull) << 48)
-            | ((uint64_t)props.Offset << 49)),
-        Set((uint64_t)props.Set
-            | ((uint64_t)props.Flag << 48)),
-        Cold(&props)
+        : get_((uint64_t)props.Get
+            | (((props.PendingNotifications != PropertyNotification::None) ? 1ull : 0ull) << NotificationFlagOffset)
+            | ((uint64_t)props.Offset << FieldPositionOffset)),
+        set_((uint64_t)props.Set
+            | ((uint64_t)props.Flag << FlagValueOffset)),
+        cold_(&props)
     {
         se_assert(props.Offset <= 0x7fff);
         se_assert(props.Flag <= 0xffff);
     }
 
-    uint64_t Get{ 0 };
-    uint64_t Set{ 0 };
-    RawPropertyAccessors const* Cold{ nullptr };
+    inline RawPropertyAccessorsHotData& operator =(RawPropertyAccessorsHotData const& props)
+    {
+        get_ = props.get_.load();
+        set_ = props.set_;
+        cold_ = props.cold_;
+        return *this;
+    }
 
     inline RawPropertyAccessors::Getter* Getter() const
     {
-        return reinterpret_cast<RawPropertyAccessors::Getter*>(Get & 0x0000ffffffffffffull);
+        return reinterpret_cast<RawPropertyAccessors::Getter*>(get_ & 0x0000ffffffffffffull);
     }
 
     inline RawPropertyAccessors::Setter* Setter() const
     {
-        return reinterpret_cast<RawPropertyAccessors::Setter*>(Set & 0x0000ffffffffffffull);
+        return reinterpret_cast<RawPropertyAccessors::Setter*>(set_ & 0x0000ffffffffffffull);
+    }
+
+    inline RawPropertyAccessors const* GetCold() const
+    {
+        return cold_;
     }
 
     inline bool HasNotifications() const
     {
-        return (Get >> 48) & 1;
+        return (get_ >> NotificationFlagOffset) & 1;
     }
 
     inline uint64_t Offset() const
     {
-        return (Get >> 49);
+        return (get_ >> FieldPositionOffset);
     }
 
     inline uint64_t Flag() const
     {
-        auto flag = (Set >> 48);
+        auto flag = (set_ >> FlagValueOffset);
         return (flag & 0x3ff) << (flag >> 10);
     }
 
-    inline void MarkNotificationsProcessed()
+    inline void MarkNotificationsProcessed() const
     {
-        Get = (Get & ~(1ull << 48));
+        get_ &= ~(1ull << NotificationFlagOffset);
     }
+
+    inline PropertyOperationResult Get(lua_State* L, LifetimeHandle lifetime, void const* object) const
+    {
+        if (HasNotifications()) [[unlikely]] {
+            MarkNotificationsProcessed();
+            ProcessPropertyNotifications(*cold_, false);
+        }
+
+        auto getter = Getter();
+        auto offset = Offset();
+        auto data = static_cast<uint8_t const*>(object) + offset;
+        return getter(L, lifetime, data, *this);
+    }
+
+    inline PropertyOperationResult Set(lua_State* L, int index, void* object) const
+    {
+        if (HasNotifications()) [[unlikely]] {
+            MarkNotificationsProcessed();
+            ProcessPropertyNotifications(*cold_, false);
+        }
+
+        auto setter = Setter();
+        auto offset = Offset();
+        auto data = static_cast<uint8_t*>(object) + offset;
+        return setter(L, data, index, *this);
+    }
+
+private:
+    // Marked as mutable for notification flag updates
+    mutable std::atomic<uint64_t> get_{ 0 };
+    uint64_t set_{ 0 };
+    RawPropertyAccessors const* cold_{ nullptr };
 };
 
 class GenericPropertyMap : Noncopyable<GenericPropertyMap>
@@ -114,13 +169,14 @@ public:
     using TFallbackNext = int (lua_State* L, LifetimeHandle lifetime, void const* object, FixedStringId const& prop);
     using TConstructor = void (void*);
     using TDestructor = void (void*);
+    using TProxyDestructor = void (void**);
     using TSerializer = void (lua_State* L, void const*);
     using TUnserializer = void (lua_State* L, int index, void*);
     using TAssigner = void (void* object, void* rhs);
 
     struct RawPropertyValidators
     {
-        using Validator = bool (void const* object, std::size_t offset, uint64_t flag);
+        using Validator = bool (void const* value, uint64_t flag);
 
         FixedString Name;
         Validator* Validate;
@@ -145,13 +201,13 @@ public:
     PropertyOperationResult SetRawProperty(lua_State* L, void* object, RawPropertyAccessors const& prop, int index) const;
     void AddRawProperty(char const* prop, typename RawPropertyAccessors::Getter* getter, typename RawPropertyAccessors::Setter* setter,
         typename RawPropertyAccessors::Serializer* serialize, std::size_t offset, uint64_t flag, 
-        PropertyNotification notification, char const* newName = nullptr, bool iterable = true);
+        PropertyNotification notification, char const* newName, bool iterable, bool inherited);
     void AddRawValidator(char const* prop, typename RawPropertyValidators::Validator* validate, std::size_t offset, uint64_t flag);
     void AddRawProperty(char const* prop, typename RawPropertyAccessors::Getter* getter,
         typename RawPropertyAccessors::Setter* setter, typename RawPropertyValidators::Validator* validate, 
         typename RawPropertyAccessors::Serializer* serialize, std::size_t offset, uint64_t flag, 
-        PropertyNotification notification, char const* newName = nullptr, bool iterable = true);
-    bool IsA(int typeRegistryIndex) const;
+        PropertyNotification notification, char const* newName, bool iterable, bool inherited);
+    bool IsA(StructTypeId typeRegistryIndex) const;
     bool ValidatePropertyMap(void const* object);
     bool ValidateObject(void const* object);
 
@@ -165,12 +221,13 @@ public:
     HashMap<FixedStringUnhashed, uint32_t> IterableProperties;
     Array<RawPropertyValidators> Validators;
     Array<FixedString> Parents;
-    Array<int> ParentRegistryIndices;
+    Array<StructTypeId> ParentRegistryIndices;
     TFallbackGetter* FallbackGetter{ nullptr };
     TFallbackSetter* FallbackSetter{ nullptr };
     TFallbackNext* FallbackNext{ nullptr };
     TConstructor* Construct{ nullptr };
     TDestructor* Destroy{ nullptr };
+    TProxyDestructor* ProxyDestroy{ nullptr };
     TAssigner* Assign{ nullptr };
     TSerializer* Serialize{ nullptr };
     TUnserializer* Unserialize{ nullptr };
@@ -251,25 +308,35 @@ inline bool GenericValidateNoopProperty(void const* obj, std::size_t offset, uin
 template <class T>
 void DefaultConstruct(void* ptr)
 {
-    new (reinterpret_cast<T*>(ptr)) T();
+    new (static_cast<T*>(ptr)) T();
 }
 
 template <class T>
 void DefaultDestroy(void* ptr)
 {
-    (reinterpret_cast<T*>(ptr))->~T();
+    (static_cast<T*>(ptr))->~T();
+}
+
+template <class T>
+void DefaultProxyDestroy(void** ptr)
+{
+    if (*ptr) {
+        (static_cast<T*>(*ptr))->~T();
+        GameFree(*ptr);
+        *ptr = nullptr;
+    }
 }
 
 template <class T>
 void DefaultSerialize(lua_State* L, void const* ptr)
 {
-    Serialize(L, reinterpret_cast<T const*>(ptr));
+    Serialize(L, static_cast<T const*>(ptr));
 }
 
 template <class T>
 void DefaultUnserialize(lua_State* L, int index, void* ptr)
 {
-    auto result = Unserialize(L, index, reinterpret_cast<T*>(ptr));
+    auto result = Unserialize(L, index, static_cast<T*>(ptr));
     if (result != PropertyOperationResult::Success) {
         luaL_error(L, "Failed to unserialize value");
     }
@@ -278,7 +345,7 @@ void DefaultUnserialize(lua_State* L, int index, void* ptr)
 template <class T>
 void DefaultAssign(void* object, void* rhs)
 {
-    *reinterpret_cast<T*>(object) = *reinterpret_cast<T*>(rhs);
+    *static_cast<T*>(object) = *static_cast<T*>(rhs);
 }
 
 
@@ -289,19 +356,20 @@ struct StructRegistry
 
     inline bool ValidateIfNecessary(StructTypeId id, void const* object) const
     {
-        if (Validated[id]) [[likely]] {
+        if (Validated[(int32_t)id]) [[likely]] {
             return true;
         } else {
             return Get(id)->ValidateIfNecessary(object);
         }
     }
 
+    void Initialize(int32_t size);
     void Register(GenericPropertyMap* ei, StructTypeId id);
 
     inline GenericPropertyMap* Get(StructTypeId id) const
     {
-        se_assert(id < (int)StructsById.size());
-        return StructsById[id];
+        assert((int)id >= 0 && (int)id < (int)StructsById.size());
+        return *(StructsById.data() + (int32_t)id);
     }
 };
 
@@ -311,8 +379,8 @@ extern StructRegistry gStructRegistry;
 template <class T>
 inline GenericPropertyMap& GetStaticPropertyMap()
 {
-    static_assert(StructID<std::remove_cv_t<T>>::Valid, "Type does not have a Lua structure definition!");
-    return *gStructRegistry.Get(StructID<std::remove_cv_t<T>>::ID);
+    static_assert(StructID<std::remove_cv_t<T>> >= StructTypeId(0), "Type does not have a Lua structure definition!");
+    return *gStructRegistry.Get(StructID<std::remove_cv_t<T>>);
 }
 
 END_NS()

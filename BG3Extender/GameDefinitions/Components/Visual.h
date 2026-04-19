@@ -2,16 +2,6 @@
 
 #include <GameDefinitions/CharacterCreation.h>
 
-BEGIN_NS(aio)
-
-struct Priority
-{
-    int field_0{ 1 };
-    float field_4{ .0f };
-};
-
-END_NS()
-
 BEGIN_SE()
 
 struct CustomIconComponent : public BaseComponent
@@ -105,29 +95,6 @@ struct GameplayLightComponent : public BaseComponent
     float field_3C;
     float field_40;
     uint8_t field_44;
-};
-
-struct StaticPhysicsComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(StaticPhysics, "ls::StaticPhysicsComponent")
-
-    // Editor only
-    // FixedString field_0;
-    // GameObjectTemplate* Template;
-    phx::PhysicsObject* Physics;
-};
-
-struct PhysicsComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(Physics, "ls::PhysicsComponent")
-
-    phx::PhysicsObject* Physics;
-    uint32_t PhysicsGroup;
-    uint32_t CollidesWith;
-    uint32_t ExtraFlags;
-    [[bg3::legacy(field_14)]] bool HasPhysics;
-    uint8_t field_15;
-    [[bg3::legacy(field_16)]] bool IsClustered;
 };
 
 struct CharacterCreationAppearanceComponent : public BaseComponent
@@ -364,9 +331,9 @@ struct VisualSetSlots
     bool ShowEquipmentVisuals;
 };
 
-struct VisualSetSlotsWrapper
+struct VisualSetSlotsWrapper : public ProtectedGameObject<VisualSetSlotsWrapper>
 {
-    VisualSetSlots Slots;
+    VisualSetSlots* Slots;
     bool Managed;
 };
 
@@ -401,6 +368,16 @@ struct VisualLoadComponent : public BaseComponent
     aio::Priority Priority;
 };
 
+struct VisualStreamComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(VisualStream, "ls::VisualStreamComponent")
+
+    int field_0{ 0 };
+    int field_4{ 0 };
+    float field_8{ -1.0 };
+    bool IsHLOD{ false };
+};
+
 struct VisualStreamLoadComponent : public BaseComponent
 {
     DEFINE_COMPONENT(VisualStreamLoad, "ls::VisualStreamLoadComponent")
@@ -414,7 +391,7 @@ struct VisualLoadDesciptionComponent : public BaseComponent
 
     FixedString VisualTemplate;
     VisualLoadFlags Flags;
-    uint8_t RenderChannel;
+    RenderChannel RenderChannel;
 };
 
 struct VisualLoadRequestsSingletonComponent : public BaseComponent
@@ -426,7 +403,7 @@ struct VisualLoadRequestsSingletonComponent : public BaseComponent
 
 struct VisualChangeRequestOneFrameComponent : public BaseComponent
 {
-    DEFINE_COMPONENT(VisualChangeRequest, "ls::VisualChangeRequestOneFrameComponent")
+    DEFINE_ONEFRAME_COMPONENT(VisualChangeRequest, "ls::VisualChangeRequestOneFrameComponent")
 
     FixedString VisualTemplate;
     VisualLoadFlags Flags;
@@ -434,7 +411,7 @@ struct VisualChangeRequestOneFrameComponent : public BaseComponent
 
 struct VisualAttachRequestOneFrameComponent : public BaseComponent
 {
-    DEFINE_COMPONENT(VisualAttachRequest, "ls::VisualAttachRequestOneFrameComponent")
+    DEFINE_ONEFRAME_COMPONENT(VisualAttachRequest, "ls::VisualAttachRequestOneFrameComponent")
 
     EntityHandle Entity;
     int field_8;
@@ -603,6 +580,21 @@ struct Construction : public ProtectedGameObject<Construction>
     ConstructionTemplate* Template;
 };
 
+// Editor only system :(
+struct ConstructionSystem : public BaseSystem
+{
+    DEFINE_SYSTEM(Construction, "ls::ConstructionSystem")
+
+    HashMap<Guid, EntityHandle> Constructions;
+    HashMap<Guid, EntityHandle> Tiles;
+    HashMap<Guid, EntityHandle> Fillings;
+    HashMap<Guid, EntityHandle> ConstructionUpdateRequests;
+    [[bg3::hidden]] void* TransformSystem;
+    [[bg3::hidden]] void* PhysicsLoaderSystem;
+    [[bg3::hidden]] void* PhysicsRequestSystem;
+    [[bg3::hidden]] void* VisualChangeRequestSystem;
+    [[bg3::hidden]] void* OcclusionSystem;
+};
 
 DEFINE_TAG_COMPONENT(ls, IsSeeThroughComponent, IsSeeThrough)
 
@@ -648,7 +640,7 @@ struct GameplayEventsSingletonComponent : public BaseComponent
 
 struct GameplayEventsOneFrameComponent : public BaseComponent
 {
-    DEFINE_COMPONENT(AnimationGameplayEvents, "eoc::animation::GameplayEventsOneFrameComponent")
+    DEFINE_ONEFRAME_COMPONENT(AnimationGameplayEvents, "eoc::animation::GameplayEventsOneFrameComponent")
 
     HashMap<EntityHandle, Array<ReceivedEvent>> Events;
 };
@@ -656,7 +648,7 @@ struct GameplayEventsOneFrameComponent : public BaseComponent
 
 struct TextKeyEventsOneFrameComponent : public BaseComponent
 {
-    DEFINE_COMPONENT(AnimationTextKeyEvents, "eoc::animation::TextKeyEventsOneFrameComponent")
+    DEFINE_ONEFRAME_COMPONENT(AnimationTextKeyEvents, "eoc::animation::TextKeyEventsOneFrameComponent")
 
     HashMap<EntityHandle, Array<TextKeyEventInfo>> Events;
 };
@@ -664,7 +656,7 @@ struct TextKeyEventsOneFrameComponent : public BaseComponent
 
 struct TriggeredEventsOneFrameComponent : public BaseComponent
 {
-    DEFINE_COMPONENT(AnimationTriggeredEvents, "eoc::animation::TriggeredEventsOneFrameComponent")
+    DEFINE_ONEFRAME_COMPONENT(AnimationTriggeredEvents, "eoc::animation::TriggeredEventsOneFrameComponent")
 
     HashMap<EntityHandle, Array<FixedString>> Events;
 };
@@ -757,11 +749,11 @@ struct EquipmentVisualRequest
 };
 
 
-struct EquipmentSubVisualRequest
+struct EquipmentVisualCallbackLoadDesc : public ProtectedGameObject<EquipmentVisualCallbackLoadDesc>
 {
     FixedString VisualTemplate;
     EntityHandle VisualEntity;
-    [[bg3::hidden]] void* LoadRequest_M;
+    [[bg3::hidden]] void* Callback;
     bool Processed;
 };
 
@@ -769,7 +761,7 @@ struct EquipmentSubVisualRequest
 struct EquipmentVisualSlotRequest
 {
     Array<EntityHandle> Item;
-    Array<EquipmentSubVisualRequest> SubRequests;
+    Array<EquipmentVisualCallbackLoadDesc*> Callbacks;
     EquipmentVisualRequest Data;
     EntityHandle field_90;
 };
@@ -778,9 +770,9 @@ struct EquipmentVisualSlot
 {
     EntityHandle Item;
     Array<EntityHandle> SubVisuals;
-    EquipmentVisualSlotRequest* VisualRequest;
+    EquipmentVisualSlotRequest* VisualRequest{ nullptr };
     std::optional<EquipmentVisualRequest> VisualData;
-    [[bg3::legacy(field_20)]] bool Loaded;
+    [[bg3::legacy(field_20)]] bool Loaded{ false };
 };
 
 struct EquipmentVisualsComponent : public BaseComponent
@@ -1069,6 +1061,40 @@ struct VisualsVisibilityStateSystem : public BaseSystem
     [[bg3::hidden]] void* GlobalTemplateManager;
     [[bg3::hidden]] void* ResourceManager;
     [[bg3::hidden]] void* VisualsVisibilityStateUnitTestHelper;
+};
+
+END_NS()
+
+BEGIN_NS(esv::splatter)
+
+struct SplatterState
+{
+    float Blood;
+    float Bruises;
+    float Dirt;
+    float Sweat;
+};
+
+struct BaseStateComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(SplatterBaseState, "esv::splatter::BaseStateComponent")
+
+    SplatterState State;
+};
+
+struct StateComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(SplatterState, "eoc::splatter::StateComponent")
+
+    SplatterState State;
+    glm::vec3 Translate;
+};
+
+struct SweatChangeComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(SplatterSweatChange, "eoc::splatter::SweatChangeComponent")
+
+    float Sweat;
 };
 
 END_NS()
