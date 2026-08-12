@@ -17,6 +17,16 @@ try {
     $sourceCommit = (& git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve the full source commit.' }
 
+    Push-Location BG3Extender
+    try {
+        & python make_enumerations.py
+        if ($LASTEXITCODE -ne 0) { throw 'Enumeration generation failed.' }
+        & python make_property_map.py
+        if ($LASTEXITCODE -ne 0) { throw 'Property-map generation failed.' }
+    } finally {
+        Pop-Location
+    }
+
     & $MSBuild BG3Tools.sln '/t:BG3Extender;LuaDebugger' '/p:Configuration=Game Release' /p:Platform=x64 "/p:PlatformToolset=$PlatformToolset" /p:PostBuildEventUseInBuild=false "/p:BG3SEPairSourceCommit=$sourceCommit" /m /nologo
     $buildExitCode = $LASTEXITCODE
 } finally {
