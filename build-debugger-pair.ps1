@@ -27,6 +27,11 @@ try {
         Pop-Location
     }
 
+    $protoc = Join-Path $PSScriptRoot 'External\protobuf\tools\protobuf\protoc.exe'
+    if (-not (Test-Path $protoc)) { throw "Missing protoc: $protoc" }
+    & $protoc --proto_path=BG3Extender --cpp_out=BG3Extender Osiris/Debugger/osidebug.proto Lua/Debugger/LuaDebug.proto Extender/Shared/ExtenderProtocol.proto
+    if ($LASTEXITCODE -ne 0) { throw 'Native protobuf generation failed.' }
+
     & $MSBuild BG3Tools.sln '/t:BG3Extender;LuaDebugger' '/p:Configuration=Game Release' /p:Platform=x64 "/p:PlatformToolset=$PlatformToolset" /p:PostBuildEventUseInBuild=false "/p:BG3SEPairSourceCommit=$sourceCommit" /m /nologo
     $buildExitCode = $LASTEXITCODE
 } finally {
