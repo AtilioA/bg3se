@@ -1,5 +1,6 @@
 param(
-    [string]$MSBuild = 'D:\VisualStudio\MSBuild\Current\Bin\MSBuild.exe'
+    [string]$MSBuild = 'D:\VisualStudio\MSBuild\Current\Bin\MSBuild.exe',
+    [string]$PlatformToolset = 'v143'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +17,7 @@ try {
     $sourceCommit = (& git rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve the full source commit.' }
 
-    & $MSBuild BG3Tools.sln '/t:BG3Extender;LuaDebugger' '/p:Configuration=Game Release' /p:Platform=x64 /p:PostBuildEventUseInBuild=false "/p:BG3SEPairSourceCommit=$sourceCommit" /m /nologo
+    & $MSBuild BG3Tools.sln '/t:BG3Extender;LuaDebugger' '/p:Configuration=Game Release' /p:Platform=x64 "/p:PlatformToolset=$PlatformToolset" /p:PostBuildEventUseInBuild=false "/p:BG3SEPairSourceCommit=$sourceCommit" /m /nologo
     $buildExitCode = $LASTEXITCODE
 } finally {
     Pop-Location
