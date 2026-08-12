@@ -538,6 +538,11 @@ bool DebugMessageHandler::HandleMessage(DebuggerToBackend const* msg)
 
     inboundSeq_++;
 
+    if (msg->msg_case() != DebuggerToBackend::kConnect && !debuggerReady_) {
+        WARN("DebugMessageHandler::HandleMessage(): Ignoring debugger command before successful pair negotiation");
+        return false;
+    }
+
     switch (msg->msg_case()) {
     case DebuggerToBackend::kConnect:
         HandleConnectMessage(seq, msg->connect());

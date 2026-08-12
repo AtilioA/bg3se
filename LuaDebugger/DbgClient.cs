@@ -112,6 +112,7 @@ namespace NSE.DebuggerFrontend
         private Stream LogStream;
         private UInt32 OutgoingSeq = 1;
         private UInt32 IncomingSeq = 1;
+        private UInt32 PendingConnectSeq;
         private readonly object SendLock = new object();
 
         public delegate void BackendConnectedDelegate(BkConnectResponse response);
@@ -192,7 +193,7 @@ namespace NSE.DebuggerFrontend
                     RequiredCapabilities = requiredCapabilities
                 }
             };
-            Send(msg);
+            PendingConnectSeq = Send(msg);
         }
 
         public void SendSetBreakpoints(IEnumerable<BreakpointInfo> breakpoints)
@@ -335,6 +336,11 @@ namespace NSE.DebuggerFrontend
             switch (message.MsgCase)
             {
                 case BackendToDebugger.MsgOneofCase.ConnectResponse:
+                    if (PendingConnectSeq == 0 || message.ReplySeqNo != PendingConnectSeq)
+                    {
+                        throw new InvalidDataException($"NSE connect response mismatch; got reply {message.ReplySeqNo} expected {PendingConnectSeq}");
+                    }
+                    PendingConnectSeq = 0;
                     OnBackendConnected(message.ConnectResponse);
                     break;
 
