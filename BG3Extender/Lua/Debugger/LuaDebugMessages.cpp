@@ -307,8 +307,11 @@ void DebugMessageHandler::SendDebugOutput(DebugMessageType type, char const* mes
 void DebugMessageHandler::SendConnectResponse(uint32_t seq)
 {
     DEBUGGER_MSG(msg);
+    msg.set_reply_seq_no(seq);
     auto version = msg.mutable_connectresponse();
     version->set_protocol_version(ProtocolVersion);
+    version->set_backend_pair_identity(BG3SE_DEBUGGER_PAIR_IDENTITY);
+    version->set_capabilities(Capabilities);
 
     Send(msg);
     DBGMSG(" <-- BkConnectResponse()");
@@ -317,11 +320,21 @@ void DebugMessageHandler::SendConnectResponse(uint32_t seq)
 void DebugMessageHandler::HandleConnectMessage(uint32_t seq, DbgConnectRequest const& req)
 {
     DBGMSG(" --> DbgConnectRequest(Version %d)", req.protocol_version());
+    debuggerReady_ = false;
+    if (debugger_) {
+        debugger_->EnableDebugging(false);
+    }
     SendConnectResponse(seq);
 
-    if (req.protocol_version() != ProtocolVersion) {
-        WARN("DebugMessageHandler::HandleConnectMessage(): Client sent unsupported protocol version; got %d, we only support %d",
-            req.protocol_version(), ProtocolVersion);
+    // Protocol 5 requires all three request fields; capability bit 0 names pair negotiation.
+    auto missingFields = req.protocol_version() == 0 || req.adapter_pair_identity().empty()
+        || req.required_capabilities() == 0;
+    auto protocolMismatch = req.protocol_version() != ProtocolVersion;
+    auto identityMismatch = req.adapter_pair_identity() != BG3SE_DEBUGGER_PAIR_IDENTITY;
+    auto capabilitiesMismatch = (Capabilities & req.required_capabilities()) != req.required_capabilities();
+    if (missingFields || protocolMismatch || identityMismatch || capabilitiesMismatch) {
+        WARN("DebugMessageHandler::HandleConnectMessage(): Incompatible debugger pair (protocol %d, identity '%s', required capabilities 0x%llx)",
+            req.protocol_version(), req.adapter_pair_identity().c_str(), (unsigned long long)req.required_capabilities());
         intf_.Disconnect();
         return;
     }
@@ -341,7 +354,9 @@ void DebugMessageHandler::HandleConnectMessage(uint32_t seq, DbgConnectRequest c
     }
 
     debuggerReady_ = true;
-    debugger_->EnableDebugging(true);
+    if (debugger_) {
+        debugger_->EnableDebugging(true);
+    }
     SendDebuggerReady();
 }
 

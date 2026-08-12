@@ -141,6 +141,7 @@ namespace NSE.DebuggerFrontend
 
     public class DAPCapabilities : IDAPMessagePayload
     {
+        public DAPBG3SEHandshake bg3se { get; set; }
         /**
          * The debug adapter supports the 'configurationDone' request.
          */
@@ -252,6 +253,18 @@ namespace NSE.DebuggerFrontend
      */
     public class DAPLaunchResponse : IDAPMessagePayload
     {
+        public DAPBG3SEHandshake bg3se { get; set; }
+    }
+
+    public class DAPBG3SEHandshake
+    {
+        public string adapterPairIdentity { get; set; }
+        public string backendPairIdentity { get; set; }
+        public UInt32? adapterProtocolVersion { get; set; }
+        public UInt32? backendProtocolVersion { get; set; }
+        public UInt64? requiredCapabilities { get; set; }
+        public UInt64? availableCapabilities { get; set; }
+        public string mismatchCode { get; set; }
     }
 
     public class DAPInitializedEvent : IDAPMessagePayload
@@ -1116,17 +1129,6 @@ namespace NSE.DebuggerFrontend
          * The client can use this optional information to present the variables in a paged UI and fetch them in chunks.
          */
         public int? indexedVariables { get; set; }
-    }
-
-    /**
-     * The event transmits the output of the last div query
-     */
-    public class DAPCustomVersionInfoEvent : IDAPMessagePayload
-    {
-        /**
-         * DAP protocol version
-         */
-        public int version;
     }
 
     /**

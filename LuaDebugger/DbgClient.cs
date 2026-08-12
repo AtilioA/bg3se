@@ -14,6 +14,21 @@ namespace NSE.DebuggerFrontend
         private TcpClient Socket;
         private byte[] MessageBuffer;
         private int BufferPos;
+        private readonly object SendLock = new object();
+
+        private void SendAll(byte[] buffer)
+        {
+            var sent = 0;
+            while (sent < buffer.Length)
+            {
+                var count = Socket.Client.Send(buffer, sent, buffer.Length - sent, SocketFlags.None);
+                if (count == 0)
+                {
+                    throw new EndOfStreamException("Debugger backend closed while sending a message");
+                }
+                sent += count;
+            }
+        }
 
         public delegate void MessageReceivedDelegate(BackendToDebugger message);
         public MessageReceivedDelegate MessageReceived = delegate { };
@@ -31,15 +46,12 @@ namespace NSE.DebuggerFrontend
         {
             while (true)
             {
-                try
+                int received = Socket.Client.Receive(MessageBuffer, BufferPos, MessageBuffer.Length - BufferPos, SocketFlags.Partial);
+                if (received == 0)
                 {
-                    int received = Socket.Client.Receive(MessageBuffer, BufferPos, MessageBuffer.Length - BufferPos, SocketFlags.Partial);
-                    BufferPos += received;
+                    throw new EndOfStreamException("Debugger backend closed before completing the handshake");
                 }
-                catch (SocketException e)
-                {
-                    throw e;
-                }
+                BufferPos += received;
 
                 while (BufferPos >= 4)
                 {
@@ -48,9 +60,9 @@ namespace NSE.DebuggerFrontend
                         | (MessageBuffer[2] << 16)
                         | (MessageBuffer[3] << 24);
 
-                    if (length >= 0x100000)
+                    if (length < 4 || length >= 0x100000)
                     {
-                        throw new InvalidDataException($"Message too long ({length} bytes)");
+                        throw new InvalidDataException($"Invalid message length ({length} bytes)");
                     }
 
                     if (BufferPos >= length)
@@ -74,19 +86,22 @@ namespace NSE.DebuggerFrontend
 
         public void Send(DebuggerToBackend message)
         {
-            using (var ms = new MemoryStream())
+            lock (SendLock)
             {
-                message.WriteTo(ms);
+                using (var ms = new MemoryStream())
+                {
+                    message.WriteTo(ms);
 
-                var length = ms.Position + 4;
-                var lengthBuf = new byte[4];
-                lengthBuf[0] = (byte)(length & 0xff);
-                lengthBuf[1] = (byte)((length >> 8) & 0xff);
-                lengthBuf[2] = (byte)((length >> 16) & 0xff);
-                lengthBuf[3] = (byte)((length >> 24) & 0xff);
-                Socket.Client.Send(lengthBuf);
-                var payload = ms.ToArray();
-                Socket.Client.Send(payload);
+                    var length = ms.Position + 4;
+                    var lengthBuf = new byte[4];
+                    lengthBuf[0] = (byte)(length & 0xff);
+                    lengthBuf[1] = (byte)((length >> 8) & 0xff);
+                    lengthBuf[2] = (byte)((length >> 16) & 0xff);
+                    lengthBuf[3] = (byte)((length >> 24) & 0xff);
+                    SendAll(lengthBuf);
+                    var payload = ms.ToArray();
+                    SendAll(payload);
+                }
             }
         }
     }
@@ -97,6 +112,7 @@ namespace NSE.DebuggerFrontend
         private Stream LogStream;
         private UInt32 OutgoingSeq = 1;
         private UInt32 IncomingSeq = 1;
+        private readonly object SendLock = new object();
 
         public delegate void BackendConnectedDelegate(BkConnectResponse response);
         public BackendConnectedDelegate OnBackendConnected = delegate { };
@@ -156,19 +172,24 @@ namespace NSE.DebuggerFrontend
 
         public UInt32 Send(DebuggerToBackend message)
         {
-            message.SeqNo = OutgoingSeq++;
-            LogMessage(message);
-            Client.Send(message);
-            return message.SeqNo;
+            lock (SendLock)
+            {
+                message.SeqNo = OutgoingSeq++;
+                LogMessage(message);
+                Client.Send(message);
+                return message.SeqNo;
+            }
         }
 
-        public void SendConnectRequest(UInt32 protocolVersion)
+        public void SendConnectRequest(UInt32 protocolVersion, string pairIdentity, UInt64 requiredCapabilities)
         {
             var msg = new DebuggerToBackend
             {
                 Connect = new DbgConnectRequest
                 {
-                    ProtocolVersion = protocolVersion
+                    ProtocolVersion = protocolVersion,
+                    AdapterPairIdentity = pairIdentity,
+                    RequiredCapabilities = requiredCapabilities
                 }
             };
             Send(msg);

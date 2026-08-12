@@ -87,10 +87,14 @@ message MsgStackFrame {
 
 message DbgConnectRequest {
   uint32 protocol_version = 1;
+  string adapter_pair_identity = 2;
+  uint64 required_capabilities = 3;
 }
 
 message BkConnectResponse {
   uint32 protocol_version = 1;
+  string backend_pair_identity = 2;
+  uint64 capabilities = 3;
 }
 
 message DbgUpdateSettings {

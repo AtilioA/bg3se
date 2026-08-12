@@ -333,6 +333,8 @@ jsoncpp-master/
 *.pb.cc
 *.pb.h
 LuaDebugger/DbgProtocol.cs
+LuaDebugger/DebuggerPairIdentity.g.cs
+BG3Extender/Lua/Debugger/DebuggerPairIdentity.g.h
 
 PublishingRoot/
 BG3UpdaterTool/

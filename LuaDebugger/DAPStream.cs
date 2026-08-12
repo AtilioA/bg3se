@@ -15,6 +15,7 @@ namespace NSE.DebuggerFrontend
         private Stream LogStream;
 
         private Int32 OutgoingSeq = 1;
+        private readonly object OutputLock = new object();
         private Int32 IncomingSeq = 1;
 
         public delegate void MessageReceivedDelegate(DAPMessage message);
@@ -145,21 +146,24 @@ namespace NSE.DebuggerFrontend
 
         public void Send(DAPMessage message)
         {
-            message.seq = OutgoingSeq++;
-            var encoded = DAPMessageSerializer.Serialize(message);
-
-            if (LogStream != null)
+            lock (OutputLock)
             {
-                using (var writer = new StreamWriter(LogStream, Encoding.UTF8, 0x1000, true))
-                {
-                    writer.Write(" DAP <<< ");
-                    writer.Write(encoded);
-                    writer.Write("\r\n");
-                }
-            }
+                message.seq = OutgoingSeq++;
+                var encoded = DAPMessageSerializer.Serialize(message);
 
-            Console.Write($"Content-Length: {encoded.Length}\r\n\r\n");
-            Console.Write(encoded);
+                if (LogStream != null)
+                {
+                    using (var writer = new StreamWriter(LogStream, Encoding.UTF8, 0x1000, true))
+                    {
+                        writer.Write(" DAP <<< ");
+                        writer.Write(encoded);
+                        writer.Write("\r\n");
+                    }
+                }
+
+                Console.Write($"Content-Length: {encoded.Length}\r\n\r\n");
+                Console.Write(encoded);
+            }
         }
 
         public void SendErrorReply(int requestSeq, string command, string errorText)
@@ -209,13 +213,22 @@ namespace NSE.DebuggerFrontend
 
         public void SendReply(DAPRequest request, string errorText)
         {
+            SendReply(request, errorText, null);
+        }
+
+        public void SendReply(DAPRequest request, string errorText, IDAPMessagePayload body)
+        {
+            if (request == null)
+                return;
+
             var reply = new DAPResponse
             {
                 type = "response",
                 request_seq = request.seq,
                 success = false,
                 command = request.command,
-                message = errorText
+                message = errorText,
+                body = body
             };
 
             Send(reply);

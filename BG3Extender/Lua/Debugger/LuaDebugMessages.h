@@ -5,6 +5,8 @@
 #include <GameDefinitions/Module.h>
 #include <Osiris/Debugger/DebugInterface.h>
 
+#include <Lua/Debugger/DebuggerPairIdentity.g.h>
+
 #if defined(DBG_PROTOCOL_DEBUG)
 #define DBGMSG(...) DEBUG(__VA_ARGS__)
 #else
@@ -36,7 +38,8 @@ namespace bg3se::lua::dbg
     class DebugMessageHandler
     {
     public:
-        static const uint32_t ProtocolVersion = 4;
+        static const uint32_t ProtocolVersion = 5;
+        static constexpr uint64_t Capabilities = uint64_t{ 1 } << 0;
 
         DebugMessageHandler(LuaDebugInterface& intf);
 
