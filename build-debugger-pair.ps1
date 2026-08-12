@@ -1,5 +1,5 @@
 param(
-    [string]$MSBuild = 'D:\VisualStudio\MSBuild\Current\Bin\MSBuild.exe',
+    [string]$MSBuild = 'D:\VisualStudio\MSBuild\Current\Bin\amd64\MSBuild.exe',
     [string]$PlatformToolset = 'v143'
 )
 
