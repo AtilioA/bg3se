@@ -118,7 +118,7 @@ bool PassivePrototypeManager::SyncStat(Object* object, PassivePrototype* proto)
     proto->StatsFunctorContext = 0;
     proto->ToggleOffContext = 0;
     proto->BoostContext = 0;
-    proto->Boosts_SV.clear();
+    proto->Boosts.clear();
 
     sync(proto, object);
     return true;

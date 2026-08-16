@@ -202,7 +202,7 @@ struct PassivePrototype : public Noncopyable<PassivePrototype>
     uint64_t ToggleOffContext{ 0 };
     uint64_t BoostContext{ 0 };
     stats::ConditionId BoostConditionsIndex;
-    [[bg3::hidden]] Array<void*> Boosts_SV;
+    Array<Guid> Boosts;
     int32_t PriorityOrder{ 0 };
     FixedString TooltipConditionalDamage;
 };

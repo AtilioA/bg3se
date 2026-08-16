@@ -211,15 +211,9 @@ namespace bg3se
         return nullptr;
     }
 
-    static bool CharacterGetSelfCalled{ false };
-
     RefReturn<esv::Character> esv::Character::LuaGetSelf() const
     {
-        if (!CharacterGetSelfCalled) {
-            CharacterGetSelfCalled = true;
-            WARN("entity.ServerCharacter.Character is deprecated; use entity.ServerCharacter instead");
-        }
-
+        WARN_ONCE("entity.ServerCharacter.Character is deprecated; use entity.ServerCharacter instead");
         return const_cast<esv::Character*>(this);
     }
 
@@ -227,11 +221,7 @@ namespace bg3se
 
     RefReturn<esv::Item> esv::Item::LuaGetSelf() const
     {
-        if (!ItemGetSelfCalled) {
-            ItemGetSelfCalled = true;
-            WARN("entity.ServerItem.Item is deprecated; use entity.ServerItem instead");
-        }
-
+        WARN_ONCE("entity.ServerItem.Item is deprecated; use entity.ServerItem instead");
         return const_cast<esv::Item*>(this);
     }
 
