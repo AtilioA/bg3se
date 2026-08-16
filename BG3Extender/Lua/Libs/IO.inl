@@ -23,6 +23,12 @@ bool SaveFile(char const* path, StringView contents)
     return script::SaveExternalFile(path, PathRootType::UserProfile, contents);
 }
 
+bool AppendFile(char const* path, StringView contents)
+{
+    OPTICK_EVENT();
+    return script::SaveExternalFile(path, PathRootType::UserProfile, contents, true);
+}
+
 void AddPathOverride(char const* path, char const* overridePath)
 {
     gExtender->AddPathOverride(path, overridePath);
@@ -39,6 +45,7 @@ void RegisterIOLib()
     BEGIN_MODULE()
     MODULE_FUNCTION(LoadFile)
     MODULE_FUNCTION(SaveFile)
+    MODULE_FUNCTION(AppendFile)
     MODULE_FUNCTION(AddPathOverride)
     MODULE_FUNCTION(GetPathOverride)
     END_MODULE()

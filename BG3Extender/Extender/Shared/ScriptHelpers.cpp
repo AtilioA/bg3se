@@ -107,7 +107,7 @@ bool CreateParentDirectoryRecursive(std::wstring_view path)
     return true;
 }
 
-bool SaveExternalFile(std::string_view path, PathRootType root, StringView contents)
+bool SaveExternalFile(std::string_view path, PathRootType root, StringView contents, bool append)
 {
     auto absolutePath = GetPathForExternalIo(path, root);
     if (!absolutePath) return false;
@@ -118,6 +118,10 @@ bool SaveExternalFile(std::string_view path, PathRootType root, StringView conte
     if (!f.good()) {
         OsiError("Could not open file for writing: '" << path << "'");
         return false;
+    }
+
+    if (append) {
+        f.seekp(0, std::ios::end);
     }
 
     f.write(contents.data(), contents.length());
