@@ -9,15 +9,21 @@ void PostMessageToServer(lua_State* L, StringView channel, StringView payload, s
     if (moduleGuid 
         && gExtender->GetServer().HasExtensionState()
         && gExtender->GetConfig().LocalMessagePassing) {
-        bg3se::net::LocalMessage msg;
-        BuildMessage(L, msg, UserId{0x10001}, channel, payload, moduleGuid, requestHandler, replyId, binary.value_or(false));
-        gExtender->GetServer().GetNetworkManager().PushLocalMessage(std::move(msg));
-    } else {
-        auto& networkMgr = gExtender->GetClient().GetNetworkManager();
-        auto msg = BuildMessage(L, ReservedUserId, channel, payload, moduleGuid, requestHandler, replyId, binary.value_or(false));
-        if (msg != nullptr) {
-            networkMgr.Send(msg);
+
+        auto localUserId = GetStaticSymbols().GetEoCServer()->GameServer->GetLocalUserId();
+
+        // Fall back to normal network message passing if we're unable to look up info for the local user
+        if (localUserId) {
+            bg3se::net::LocalMessage msg;
+            BuildMessage(L, msg, *localUserId, channel, payload, moduleGuid, requestHandler, replyId, binary.value_or(false));
+            gExtender->GetServer().GetNetworkManager().PushLocalMessage(std::move(msg));
         }
+    }
+    
+    auto& networkMgr = gExtender->GetClient().GetNetworkManager();
+    auto msg = BuildMessage(L, ReservedUserId, channel, payload, moduleGuid, requestHandler, replyId, binary.value_or(false));
+    if (msg != nullptr) {
+        networkMgr.Send(msg);
     }
 }
 

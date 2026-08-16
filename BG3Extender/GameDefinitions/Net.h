@@ -318,9 +318,11 @@ struct GameServer : public Host
     LegacyRefMap<PeerId, GamePeerInfo> PeerInfo;
     LegacyRefMap<EntityHandle, UserId> CharacterOwners;
     int ServerState;
-    int LocalPeerId;
+    PeerId LocalPeerId;
     void* VoicePeerInterface;
     UnknownFunction field_6E8;
+
+    std::optional<UserId> GetLocalUserId() const;
 };
 
 struct Client : public AbstractPeer

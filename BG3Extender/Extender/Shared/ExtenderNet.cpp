@@ -55,6 +55,19 @@ Message* MessagePool::GetFreeMessage()
     return msg;
 }
 
+std::optional<UserId> GameServer::GetLocalUserId() const
+{
+    if (!LocalPeerId) return {};
+
+    auto peerInfo = PeerInfo.find(LocalPeerId);
+    if (peerInfo) {
+        for (auto const& it : peerInfo.Value().Players) {
+            return UserId(LocalPeerId, it.Key);
+        }
+    }
+
+    return {};
+}
 
 ExtenderProtocolBase::~ExtenderProtocolBase() {}
 

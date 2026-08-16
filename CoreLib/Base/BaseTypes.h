@@ -78,6 +78,7 @@ namespace bg3se
         inline constexpr UserId() : Id(Unassigned) {}
         inline explicit constexpr UserId(TUserId id) : Id(id) {}
         inline constexpr UserId(UserId const& id) : Id(id.Id) {}
+        inline constexpr UserId(PeerId peerId, uint16_t userIndex) : Id(((uint32_t)peerId << 16) | userIndex) {}
 
         inline explicit operator bool() const
         {
