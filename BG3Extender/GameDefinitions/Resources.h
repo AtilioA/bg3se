@@ -347,8 +347,8 @@ struct [[bg3::hidden]] ResourceManager
     Array<void*> VisualLoaders;
     LegacyMap<FixedString, void*> GenomeAnimationManagers;
     gn::GenomeTypeManager* GenomeTypeManager;
-    ui::UIManager* UIManager;
-    ui::UIManager* UIManagerSwap;
+    ui::GameUI* UI;
+    ui::GameUI* UISwap;
 };
 
 END_SE()

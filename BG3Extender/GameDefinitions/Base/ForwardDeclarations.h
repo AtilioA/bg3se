@@ -248,7 +248,7 @@ namespace phx
 
 namespace ui
 {
-    struct UIManager;
+    struct GameUI;
 }
 
 namespace extui

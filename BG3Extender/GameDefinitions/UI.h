@@ -16,6 +16,8 @@
 #include <NsGui/ObservableCollection.h>
 #include <NsGui/UIElementCollection.h>
 #include <NsGui/ContentControl.h>
+#include <NsGui/UserControl.h>
+#include <NsGui/Uri.h>
 
 BEGIN_BARE_NS(Noesis)
 
@@ -295,8 +297,13 @@ BEGIN_NS(ui)
 using namespace Noesis;
 
 struct UICanvas;
-struct UIManager_Sub1F0;
-struct UIManager_Sub198;
+struct TooltipManager;
+struct ContextMenuManager;
+struct StateMachine;
+struct DragAndDropManager;
+struct MessageBoxManager;
+struct BrushManager;
+struct WindowManager;
 
 struct UIInitialSubstate : public Noesis::BaseComponent
 {
@@ -318,6 +325,7 @@ struct UIStateWidget : public Noesis::BaseComponent
     String Filename;
     String Layer;
     String SoundLayer;
+    Noesis::Uri Uri;
     bool IgnoreHitTest;
     bool BlockedLoading;
     bool AllowCreationDelay;
@@ -367,34 +375,43 @@ struct UIState : public Noesis::BaseComponent
 };
 
 
-struct UIWidget : public ContentControl
+struct UIWidget : public UserControl
 {
-    __int64 field_278;
-    __int64 field_280;
-    __int64 field_288;
-    __int64 field_290;
-    __int64 field_298;
-    __int64 field_2A0;
-    __int64 field_2A8;
-    __int64 field_2B0;
-    __int64 field_2B8;
-    __int64 field_2C0;
-    __int64 field_2C8[5];
-    UIManager_Sub1F0* Sub1F0;
+    CRITICAL_SECTION CS_;
+    Array<void*> field_2A0_InputChildInfo;
+    Array<void*> field_2B0_InputChildChange;
+    uint64_t qword2C0[2];
+    ContextMenuManager* ContextMenuManager;
+    void* qword2D8;
+    TooltipManager* TooltipManager;
+    WindowManager* WindowManager;
+    StateMachine* StateMachine;
     UIStateWidget* WidgetData;
-    __int64 field_2D0;
-    Guid StateGuid;
-    FrameworkElement* WidgetContainerGrid;
-    int field_2F0;
-    int field_2F4;
-    STDString XAMLPath;
-    uint8_t field_310;
-    uint8_t field_311;
-    uint8_t field_312;
-    __int64 field_318;
-    __int64 field_320;
-    __int64 field_328;
-    __int64 field_330;
+    void* InputManager;
+    Guid StateId;
+    void* ParentCanvas;
+    DWORD LayerIndex;
+    int IndexInLayer;
+    STDString FileName;
+    Noesis::BaseRefCounted* ContextMenu;
+    Noesis::UIElement* FocusRefresh;
+    Noesis::UIElement* GetRequestedFocusFallback;
+    Noesis::BaseRefCounted* FocusVisual;
+    Noesis::BaseRefCounted* qword360;
+    int FocusDownEvent;
+    int FocusLeftEvent;
+    int FocusRightEvent;
+    int FocusUpEvent;
+    int UIPasteEvent;
+    int UICopyEvent;
+    int UICutEvent;
+    int UISelectAllTextEvent;
+    int UIContextMenuEvent;
+    int MoveFocusInputState;
+    uint8_t Flags;
+    uint8_t Flags2;
+    uint8_t Flags3;
+    PlayerId PlayerId;
 };
 
 
@@ -436,8 +453,8 @@ struct UIStateMachine : public Noesis::BaseComponent
     char field_8F;
     char field_90;
     UIStateInstance* State;
-    UIManager_Sub1F0* field_A0;
-    UIManager_Sub198* field_A8;
+    void* field_A0;
+    void* field_A8;
     HashMap<Guid, uint64_t> field_B0_MHM_Guid_pStateStack; // StateStack*
     HashMap<Guid, UIStateInstance*> field_F0_MHM_Guid_pState;
     HashMap<Guid, UIStateInstance*> field_130_MHM_Guid_pState;
@@ -512,132 +529,543 @@ struct UIStateMachine : public Noesis::BaseComponent
 
 };
 
-struct UIManager_Sub50
+template <class T>
+struct alignas(64) UnsafeMessageQueue : public ProtectedGameObject<UnsafeMessageQueue<T>>
 {
-    void* field_50;
-    void* field_58;
-    float field_60;
-    float field_64;
-    float field_68;
-    void* field_70;
-    int field_78;
-    int Width;
-    int Height;
-    __int16 field_84;
+    T* Head;
+    struct alignas(64)
+    {
+        T* Tail;
+        T* BufferEnd;
+        T* SomeBufferPtr;
+        T* NextBuffer;
+    };
 };
 
-struct UIManager_Sub70
+struct GameUIParams
 {
-    UIManager_Sub50 field_0;
+    void* RendererCommandBuffer;
+    void* gap8;
+    float oword10;
+    float field_14;
+    float field_18;
+    int field_1C;
+    void* ResourceManager;
+    int CurHeight_M;
+    int ScreenWidth;
+    int ScreenHeight;
+    BYTE IsNuWT;
+    char field_35;
+    char field_36;
+    char field_37;
+};
+
+struct NoesisUIManager
+{
+    GameUIParams Params;
     Noesis::BaseRefCounted* RenderContext;
-    Noesis::BaseRefCounted* RenderDevice;
-    Noesis::BaseRefCounted* field_48;
-    Noesis::BaseRefCounted* field_50;
-    Noesis::BaseRefCounted* ElementCacheManager;
-    UICanvas* Canvas;
-    void* field_68;
-    __int64 field_70;
-    void* field_78;
-    int field_80;
-    void* field_88;
-    int field_90;
-    int field_94;
-    int field_98;
-    float field_9C;
-    __int64 field_A0;
-    __int64 field_A8;
-    __int64 field_B0;
+    void* RenderDevice;
+    Noesis::BaseRefCounted* XamlProvider;
+    Noesis::BaseRefCounted* FontProvider;
+    Noesis::BaseRefCounted* ElementCache;
+    UICanvas* MainCanvas;
+    Noesis::BaseRefCounted* field_68;
+    void* View;
+    Noesis::BaseRefCounted* DebugOverlay;
+    Noesis::BaseRefCounted* ReloadingXaml;
+    Noesis::BaseRefCounted* DirectlyOver;
+    uint32_t field_90;
+    void* DeferredCollectionsManager;
+    void* DeferredPredicatesManager;
+    void* DeferredPropertiesManager;
+    BrushManager* BrushManager;
+    ContextMenuManager* ContextMenuManager;
+    ModManager* ModManager;
+    TooltipManager* TooltipManager;
+    uint32_t CurHeight_M;
+    uint32_t ScreenWidth;
+    uint32_t ScreenHeight;
+    float ViewScale;
+    double field_E0;
+    int LastMouseX;
+    int LastMouseY;
+    __int64 field_F0;
+    __int64 field_F8;
+    UnsafeMessageQueue<void*> InputEvents;
+    uint8_t MouseOverUI;
+    uint8_t PointOverUI;
+    uint8_t ControllerPointPosChanged;
+    uint8_t gap183[5];
+    float ControllerPointPos[2];
+    float ViewMousePosition[2];
+    CRITICAL_SECTION CS_;
+    char Flags;
+    uint8_t Flags2;
 };
 
-struct UIManager_Sub120
-{
-    __int64 field_0;
-    UnknownSignal field_8;
-    UnknownSignal field_20;
-};
-
-struct UIManager_Sub168
-{
-    Array<void*> field_0;
-    int field_10;
-    int field_14;
-};
-
-struct UIManager_Sub198
-{
-    UnknownSignal field_0;
-    HashSet<uint64_t> field_18;
-    Array<void*> field_48;
-};
-
-struct UIManager_Sub1F0
-{
-    UnknownSignal field_0;
-    UnknownSignal field_18;
-    UnknownSignal field_30;
-    UnknownSignal field_48;
-    UnknownSignal field_60;
-    __int64 field_78;
-    __int64 field_80;
-    Noesis::BaseComponent* field_88;
-    Noesis::BaseComponent* field_90;
-    Array<void*> field_98_Arr_pWidget;
-    Array<void*> field_A8_Arr_pWidget;
-    LegacyRefMap<int, int> field_B8;
-    __int64 field_C8;
-    Noesis::BaseObject* field_D0;
-    __int64 field_D8;
-    CRITICAL_SECTION field_E0;
-    HashMap<void*, void*> field_108_MHM_StateKey_DCAccum;
-    Noesis::BaseComponent* field_148;
-    Noesis::BaseComponent* field_150;
-    Noesis::BaseComponent* field_158;
-    Noesis::BaseComponent* field_160;
-    Array<void*> field_168_Arr_WidgetLoadDelayedData;
-};
-
-struct UIManager_Sub358
-{
-    Noesis::BaseComponent* field_0;
-    Noesis::BaseComponent* field_8;
-    Noesis::BaseComponent* field_10;
-    Noesis::BaseComponent* field_18;
-    CRITICAL_SECTION field_20;
-    Noesis::BaseRefCounted* field_48;
-    Noesis::BaseRefCounted* field_50;
-    UIStateMachine* StateMachine;
-};
-
-struct UIManager : public ProtectedGameObject<UIManager>
+struct BrushManagerBase
 {
     void* VMT;
-    void* VMT3;
-    void* VMT2;
-    __int64 field_18;
-    void* VMT4;
-    __int64 field_28;
-    void* VMT5;
-    UnknownSignal field_38;
-    UIManager_Sub50 field_50;
-    void* field_88x;
-    uint64_t field_90[6];
-    UIManager_Sub70 field_88;
-    __int64 field_120;
-    UnknownSignal field_148;
-    UnknownSignal field_160x;
-    UnknownSignal field_160;
-    __int64 field_198x[8];
-    //__int64 field_180;
-    //__int64 field_1A8;
-    //UnknownSignal field_190;
-    //__int64 field_1C8;
-    UnknownSignal field_1D0;
-    HashMap<int16_t, void*> field_1E8_MHM_short_PlayerContextMenu;
-    __int64 field_228;
-    Array<void*> field_230_Arr_ModData;
-    UIManager_Sub1F0 field_240;
-    UIManager_Sub358 field_3B8;
+    void* TextureProvider;
+    Noesis::BaseCollection* BrushesToRemove;
+    CRITICAL_SECTION CS_;
 };
+
+
+struct BrushManager : public BrushManagerBase
+{
+    UnknownSignal qword40;
+    UnknownSignal qword58;
+    UnknownSignal qword70;
+    void* TextureProvider2;
+};
+
+struct CommandProcessor
+{
+    CRITICAL_SECTION CS_;
+    uint8_t Flags;
+    Queue<void*> CommandQueue;
+};
+
+struct ModManager
+{
+    void* RegisterCallback;
+    Array<void*> Mods_Arr_uiModData;
+};
+
+struct WindowManager
+{
+    UnknownSignal FinishLoadWidgetSignal;
+    UnknownSignal FinishLoadWidgetSignal2;
+    UnknownSignal CancelOpenWidgetSignal;
+    UnknownSignal CloseWidgetSignal;
+    UnknownSignal field_60;
+    CRITICAL_SECTION LoadXAMLCS;
+    CRITICAL_SECTION LoadCS;
+    Array<void*> PendingPreloads_pPreloadWidgetData;
+    // TK only
+    // Queue<void*> field_d8_pPreloadWidgetData;
+    ModManager* ModManager;
+    NoesisUIManager* NoesisUIManager;
+    void* field_F8;
+    TooltipManager* TooltipManager;
+    ContextMenuManager* ContextMenuManager;
+    StateMachine* StateMachine;
+    Array<void*> Widgets_Ptr_uiWidget;
+    Array<void*> field_128_Ptr_uiWidget;
+    LegacyRefMap<FixedString, void*> field_138_Map_FS_Unk;
+    uint8_t field_148;
+    uint8_t field_149;
+    void* field_150;
+    void* InputManager;
+    CRITICAL_SECTION UnloadCS;
+    HashMap<FixedString, void*> field_188_MHM_StateKey_DCAccum;
+    Noesis::BaseCollection* field_1C8;
+    Noesis::BaseCollection* field_1D0;
+    Noesis::BaseCollection* field_1D8;
+    Noesis::BaseCollection* field_1E0;
+    Noesis::BaseCollection* field_1E8;
+    Noesis::BaseCollection* field_1F0;
+    Noesis::BaseCollection* DataContextStorage;
+    HashMap<Guid, void*> field_200_Guid_StateWidgetsToRemove;
+    HashMap<Guid, void*> field_240_Guid_WidgetToFinishLoadingData;
+    UnsafeMessageQueue<void*> DelayedWidgetLoads_UnsafeMessageQueue;
+};
+
+struct StateMachine
+{
+    MessageBoxManager* MessageBoxManager;
+    ModManager* ModManager;
+    ContextMenuManager* ContextMenuManager;
+    WindowManager* WindowManager;
+    CRITICAL_SECTION CS_;
+    Noesis::BaseRefCounted* qword48;
+    UIStateMachine* StateMachineComponent;
+    Noesis::BaseRefCounted* StoredStateMachineComponent;
+    UnknownFunction ContextMenu_UpdateFromUI;
+    Array<void*> LoadedMods_Arr_UIModData;
+    bool ApplyModsRequested;
+};
+
+struct ViewModelProviderBase
+{
+    void* VMT;
+    void* VMGameData;
+    HashMap<uint32_t, void*> Systems_MHM_u32_Ptr_uiSystem;
+};
+
+
+struct ViewModelProvider : public ViewModelProviderBase
+{
+    void* field_50;
+    void* ShroudEventListenerVMT;
+    void* DefaultQuestListenerVMT;
+    void* NetEventListenerVMT;
+    void* CommunityAPIEventListenerVMT;
+    char field_78[56];
+    void* GameEventListenerVMT;
+    UnknownSignal InitializeLocalPlayerSignal;
+    UnknownSignal PlayerCombatNotificationSignal;
+    UnknownSignal CharacterFTBEnteredSignal;
+    UnknownSignal qword100;
+    UnknownSignal SelectedCharacterChangedSignal;
+    UnknownSignal qword130;
+    UnknownSignal CharacterActivatedSignal;
+    UnknownSignal CharacterDeactivatedSignal;
+    UnknownSignal ActiveSlotChangedSignal;
+    UnknownSignal qword190;
+    UnknownSignal GameMenuOpenChangedSignal;
+    UnknownSignal qword1C0;
+    UnknownSignal InventoryOperationSignal;
+    UnknownSignal qword1F0;
+    UnknownSignal ItemRegisteredSignal;
+    UnknownSignal UIInputMethodChangedSignal;
+    UnknownSignal ConnectedSignal;
+    uint16_t TargetGameObjectFlags;
+    ecs::EntityRef TargetGameObject;
+    void* TranslatedStringKeyManager;
+    void* SpellPrototypeManager;
+    void* ImmutableDataHeadmaster;
+    void* ActionResourceTypes;
+    void* InputManager;
+    void* ProgressionManager;
+    void* ProgressionDescriptionManager;
+    void* BoostPrototypeManager;
+    void* ExternalCommunityAPI;
+    void* PlayerManager;
+    void* qword2C0;
+    BrushManager* BrushManager;
+    NoesisUIManager* NoesisUIManager;
+    StateMachine* StateMachine;
+    DragAndDropManager* DragAndDropManager;
+    UnknownFunction field_2e8;
+    HashMap<PlayerId, UnknownFunction> MHM_u16_SignalConnectionCollection;
+    UnknownSignalSubscriber field_360[27];
+    HashSet<EntityHandle> SummonsUpdated_MHS_EH;
+    HashSet<EntityHandle> CharacterActivated_MHS_EH;
+    HashSet<EntityHandle> field_C38_MHS_EH;
+    HashSet<EntityHandle> ApprovalRatingChanged_MHS_EH;
+    HashSet<EntityHandle> ShortRestAvailabilityChanged_MHS_EH;
+    HashMap<EntityHandle, EntityHandle> UnregisterInventoryContainer_MHM_EH_EH;
+    HashMap<PlayerId, EntityHandle> TargetGameObjects_MHM_short_EH;
+    HashMap<EntityHandle, HashSet<ComponentHandle>> StatusUpdated_MHM_EH_HashSet_OH;
+    HashMap<EntityHandle, HashSet<ComponentHandle>> StatusApplied_MHM_EH_HashSet_OH;
+    HashMap<EntityHandle, HashSet<ComponentHandle>> StatusRemoved_MHM_EH_HashSet_OH;
+    HashMap<EntityHandle, HashSet<ComponentHandle>> UpdatedStatusLifetimes_MHM_EH_HashSet_OH;
+    HashMap<EntityHandle, HashSet<ComponentHandle>> UpdatedAddedStatuses_MHM_EH_HashSet_OH;
+    HashMap<EntityHandle, HashSet<ComponentHandle>> UpdatedRemovedStatuses_MHM_EH_HashSet_OH;
+    HashMap<PlayerId, void*> DelayDialogueRequestSwitchCharacter_MHM_short_CharacterSwapDelayData;
+    int FlagHandler;
+    void* gapF0C;
+    uint64_t unkF18[14];
+    uint64_t qwordF88;
+    uint8_t Flags;
+    uint8_t Flags2;
+    HashMap<UserId, float> RemotePlayerFloats_MHM_u32_float;
+    HashSet<UserId> RemotePlayerUserIds_MHS_u32;
+    HashMap<PlayerId, uint8_t> DeferredSetContainerState_MHM_short_EContainerState;
+    HashMap<EntityHandle, uint8_t> LevelLoad_MHM_EH_u8;
+    HashMap<PlayerId, bool> GameMenuOpen_MHM_short_bool;
+    HashMap<PlayerId, void*> CursorInfo_MHM_short_eclTaskInfo;
+    HashSet<PlayerId> CursorInfo2_MHS_short;
+    HashSet<PlayerId> PreviewTaskChanged_MHS_short;
+    struct ecs::EntityWorld* EntityWorld;
+    void* Thoth;
+    Array<UnknownFunction> SystemUpdate_Arr_Function;
+    HashSet<EntityHandle> OwnedCharacterActivated_MHS_EH;
+    HashMap<EntityHandle, HashSet<SpellId>> field_11B8_MHM_EH_HashSet_SpellId;
+    uint32_t GameStateID;
+    void* ShroudTexture;
+    int8_t RequestSetControllerType;
+    HashMap<PlayerId, Array<EntityHandle>> DelayedShowActiveSearch_MHM_short_Arr_EH;
+    Array<EntityHandle> DelayedInventoryRefresh;
+    Array<void*> TimelineEvents_Arr_TTimelineEvent;
+    HashMap<PlayerId, Array<EntityHandle>> ActiveRollOpen_MHM_short_MHS_EH;
+    Array<EntityHandle> SetActiveDialogue;
+    void* DeferredPredicatesManager;
+    Array<PlayerId> ShroudReload;
+};
+
+struct ContextMenuManagerBase
+{
+    void* VMT;
+    HashMap<PlayerId, void*> Menus_MHM_u16_PlayerContextMenu;
+};
+
+struct ContextMenuManager : public ContextMenuManagerBase
+{
+    TooltipManager* TooltipManager;
+    MPMCQueueBounded<PlayerId> OPOCCircularQueue_short;
+};
+
+struct DataContextProviderBase
+{
+    void* VMT;
+    ui::DCWidget* GlobalDataContext;
+    LegacyRefMap<uint16_t, HashMap<FixedString, Noesis::Ptr<DCWidget>*>> CustomDC_RefMap_u16_MHM_FS_Ptr_DCWidget;
+    StateMachine* StateMachine;
+    ViewModelProvider* ViewModelProvider;
+    Noesis::BaseCollection* DataContextToInit;
+    Noesis::BaseCollection* DataContextToInitFromUI;
+    Noesis::BaseCollection* DataContextToRelease;
+    Noesis::BaseCollection* qword48;
+    CRITICAL_SECTION CS_;
+};
+
+
+struct DataContextProvider : public DataContextProviderBase
+{
+    DragAndDropManager* DragAndDropManager;
+    DCWidget* GlobalDataContext2;
+    BrushManager* BrushManager;
+    ModManager* ModManager;
+    HashMap<FixedString, Noesis::Ptr<Noesis::BaseCollection>> qword90_MHM_FS_Ptr_Collection_DCWidget;
+    MPMCQueueBounded<FixedString> InitDataContexts_OPOCCircularQueue_FS;
+    uint8_t byteF0;
+};
+
+struct DragAndDropManager
+{
+    UnknownSignal qword0;
+    NoesisUIManager* NoesisUIManager;
+    ViewModelProvider* ViewModelProvider;
+    void* eclDragDropManager;
+    void* qword30;
+    void* qword38;
+    void* qword40;
+    void* qword48;
+    void* qword50;
+    Array<PlayerId> qword58;
+    Array<PlayerId> qword68;
+    bool CanExecuteDragEvents;
+    bool NeedsUpdate;
+    uint8_t byte7A;
+    MPMCQueueBounded<PlayerId> field_80_OPOCCircularQueue_i16;
+    HashMap<PlayerId, uint64_t> field_a0_MHM_u16_u64;
+    HashMap<PlayerId, uint64_t> field_e0_MHM_u16_u64;
+    Array<void*> DelayedDragEvents_Arr_TDelayedDragEvent[4];
+    MPMCQueueBounded<void*> field_160_Queue_TStartDraggingRequest;
+};
+
+struct TooltipManager
+{
+    void* VMT;
+    UnknownFunction SignalCollection;
+    void* qword40;
+    NoesisUIManager* NoesisUIManager;
+    ViewModelProvider* ViewModelProvider;
+    DragAndDropManager* DragAndDropManager;
+    StateMachine* StateMachine;
+    Array<void*> field_70_MHM_i16_pPlayerTooltipData;
+    uint16_t wordB0;
+    HashMap<PlayerId, void*> field_b8_MHM_i16_DelayedTooltipData;
+    HashSet<PlayerId> field_f8_MHS_i16;
+    HashSet<PlayerId> field_128_HashSet_u16;
+    void* qword158;
+    MPMCQueueBounded<std::pair<short, bool>> field_160_Queue_Pair_short_bool;
+    MPMCQueueBounded<std::pair<short, bool>> field_180_Queue_Pair_short_bool;
+    bool Initialized;
+    bool field_1A1;
+    bool byte1A2;
+    MPMCQueueBounded<PlayerId> field_1A8_Queue_i16;
+    MPMCQueueBounded<PlayerId> field_1c8_Queue_i16;
+    MPMCQueueBounded<PlayerId> field_1e8_Queue_i16;
+    MPMCQueueBounded<PlayerId> field_208_Queue_i16;
+    MPMCQueueBounded<std::pair<short, bool>> field_228_Queue_Pair_short_bool;
+};
+
+struct MessageBoxManager
+{
+    void* VMT;
+    void* VMT2;
+    BYTE word10;
+    char field_11;
+    TranslatedString field_14;
+    int field_24;
+    Noesis::BaseCollection* field_28;
+    void* MessageBoxDC;
+    Noesis::BaseComponent* MessageBox;
+    Noesis::BaseRefCounted* field_40;
+    uint8_t gap48[32];
+    StateMachine* StateMachine;
+    CommandProcessor* CommandProcessor;
+    DataContextProvider* DataContextProvider;
+    ViewModelProvider* ViewModelProvider;
+    Array<void*> field_88_Arr_PendingMessageBox;
+};
+
+struct UINotificationManager
+{
+    void* VMT;
+    UnknownFunction SignalCollection;
+    void* SoundManager;
+    void* BrushManager;
+    ViewModelProvider* ViewModelProvider;
+    void* PlayerManager;
+    void* TutorialManager;
+    void* TranslatedStringKeyManager;
+    void* BackgroundManager;
+    void* BackgroundGoals;
+    void* ExperienceRewards;
+    void* SpellPrototypeManager;
+    HashSet<EntityHandle> field_98;
+};
+
+struct TwitchOverlayManager
+{
+    uint64_t RequestTime;
+    void* qword8;
+    uint16_t word10;
+    __int64 field_18;
+    __int64 field_20;
+    __int64 field_28;
+    __int64 field_30;
+    __int64 field_38;
+    __int64 field_40;
+    STDString ls__stdstring48;
+    ViewModelProvider* ViewModelProvider;
+    void* JsonConverter;
+    HashSet<uint64_t> field_70_MHS_u64;
+    void* qwordA0;
+    uint64_t RequestTimeDeadline;
+    STDString TwitchExtBaseURL;
+    STDString TwitchExtToken;
+    STDString TwitchExtSecret;
+    CRITICAL_SECTION CS_;
+    int net__defaulthttprequestmanager120;
+    EntityHandle qword128;
+    EntityHandle HttpRequest;
+};
+
+struct TutorialManager
+{
+    ViewModelProvider* ViewModelProvider;
+    StateMachine* StateMachine;
+    UnknownFunction SignalCollection;
+    Array<PlayerId> field_50_Arr_i16;
+    Array<void*> field_60_Arr_HideRequest;
+    Array<void*> field_70_Arr_ShowRequest;
+    uint8_t byte80;
+    Array<void*> field_88_Arr_ActiveTutorial;
+};
+
+
+struct GameUI
+{
+    void* VMT;
+    void* InputEventListenerVMT;
+    void* PlayerEventListenerVMT;
+    uint64_t field_18;
+    void* GameStateEventListenerVMT;
+    uint64_t ls__eventlistenerbase28;
+    void* GameEventManagerListenerVMT;
+    UnknownSignal SplitScreenChangedSignal;
+    GameUIParams GameUIParams;
+    NoesisUIManager NoesisUIManager;
+    BrushManager BrushManager;
+    alignas(64) uint16_t field_380;
+    MPMCQueueBounded<void*> CommandQueue;
+    ModManager ModManager;
+    __int64 field_3B0;
+    __int64 field_3B8;
+    WindowManager WindowManager;
+    StateMachine StateMachine;
+    ViewModelProvider ViewModelProvider;
+    ContextMenuManager ContextMenuManager;
+    DataContextProvider DataContextProvider;
+    DragAndDropManager DragAndDropManager;
+    TooltipManager TooltipManager;
+    MessageBoxManager MessageBoxManager;
+    UINotificationManager NotificationManager;
+    TwitchOverlayManager TwitchOverlayManager;
+    TutorialManager TutorialManager;
+    void* DeferredPropertiesManager;
+    __int64 field_22C0;
+    void* SplitscreenRequestSystem;
+    int field_22D0;
+    int field_22D4;
+    void* TextureProvider;
+    __int64 field_22E0;
+    __int64 field_22E8;
+    __int64 field_22F0;
+    __int64 field_22F8;
+    Array<void*> field_2300_OpenTradeRequest;
+    Array<void*> field_2310_OpenActiveRollRequest;
+    Array<void*> field_2320_OpenRewardRequest;
+    Array<void*> field_2330_OpenMakeCampRequest;
+    HashMap<PlayerId, void*> field_2340_MHM_i16_ShowDialogueUIRequest;
+    HashSet<PlayerId> field_2380_MHS_i16;
+    Array<void*> field_23b0_TimelineTransitionRequest;
+    Array<EntityHandle> field_23c0_CharacterCreationPlayers;
+    HashMap<PlayerId, HashSet<EntityHandle>> field_23d0_MHM_u16_MHS_EH;
+    HashSet<PlayerId> field_2410_i16;
+    UnknownFunction field_2440_SignalConnectionCollection;
+    int64_t SetControllerModeSubscriberId;
+    int64_t OnWidgetFinishedLoadingSubscriberId;
+    HashMap<PlayerId, uint64_t> field_2490_u16_u64;
+    uint32_t DeviceType2;
+    uint8_t ControllerType;
+    uint8_t gap24D5[3];
+    uint32_t DeviceType;
+    uint8_t InitState;
+    uint8_t Flags_byte24DD;
+    uint8_t byte24DE;
+    uint8_t dword24DF;
+    uint8_t field_24E0;
+    uint8_t field_24E1;
+    uint8_t DisableUpdates;
+    uint8_t byte24E3;
+    void* GameControl;
+    void* PlayerManager;
+    uint32_t dword24F8;
+    uint8_t ReloadState;
+    HashSet<EntityHandle> field_2500_EH_Timelines;
+    HashSet<uint32_t> field_2530_u32;
+    void* NoesisGUI;
+    uint64_t field_2E20;
+    uint32_t field_2E28;
+    uint32_t field_2E2C;
+    const char* field_2E30;
+    const char* field_2580;
+    uint64_t field_2E40;
+    uint32_t field_2E48;
+    const char* field_2E50;
+    const char* field_2E58;
+    const char* field_2E60;
+    uint64_t field_2E68;
+    uint32_t field_2E70;
+    const char* field_2e78;
+    const char* field_2e80;
+    const char* field_2e88;
+    const char* field_2e90;
+    const char* field_2e98;
+    const char* field_2ea0;
+    HashMap<uint32_t, void*> field_25f0_MHM_u32_pUiSystem[4];
+    Array<void*> field_26f0_ui_Event;
+    Array<void*> field_2700_TDelayedOpenCombine;
+    Array<void*> field_2710_FireEventDesc;
+    Array<void*> field_2720_InputEvent;
+    CRITICAL_SECTION EventsCS_;
+    CRITICAL_SECTION UpdateCS_;
+    CRITICAL_SECTION RenderCS_;
+    CRITICAL_SECTION RenderOffscreenWithoutUpdatingCS_;
+    Array<PlayerId> AddLocalPlayers;
+    Array<PlayerId> InitializeLocalPlayers;
+    HashMap<PlayerId, void*> field_27f0_MHM_short_OpenActiveRollWidgetEventDelayedData;
+    UnsafeMessageQueue<void*> qword2840_UnsafeMessageQueue_WidgetClosedData;
+    double GameTime;
+    float ScaledTickDelta;
+    float TickDelta;
+    uint32_t Ticks;
+    uint32_t gap28D4;
+    uint32_t dword28D8;
+    uint32_t gap28DC;
+    Array<void*> qword28E0_Arr_EGameStateID;
+    int RenderOffscreenRetries;
+    int LastTicks;
+};
+
+
 
 struct UICanvas : public Noesis::Panel
 {
@@ -648,7 +1076,7 @@ struct UICanvas : public Noesis::Panel
     __int64 field_2C0;
     __int64 field_2C8;
     __int64 field_2D0;
-    UIManager_Sub70* UIManager70;
+    NoesisUIManager* UIManager70;
     __int64 ElementCacheManager;
     DependencyObject* field_2E8;
     float field_2F0;
