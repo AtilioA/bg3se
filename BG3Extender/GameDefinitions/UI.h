@@ -390,7 +390,7 @@ struct UIWidget : public UserControl
     void* InputManager;
     Guid StateId;
     void* ParentCanvas;
-    DWORD LayerIndex;
+    int LayerIndex;
     int IndexInLayer;
     STDString FileName;
     Noesis::BaseRefCounted* ContextMenu;

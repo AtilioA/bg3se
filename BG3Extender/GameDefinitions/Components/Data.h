@@ -246,23 +246,6 @@ struct LootComponent : public BaseComponent
     uint8_t InventoryType;
 };
 
-struct LockComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(Lock, "eoc::lock::LockComponent")
-
-    FixedString Key_M;
-    int LockDC;
-    [[bg3::legacy(field_8)]] Guid LockDifficultyClassID;
-    Array<Guid> field_18;
-};
-
-struct KeyComponent : public BaseComponent
-{
-    DEFINE_COMPONENT(Key, "eoc::lock::KeyComponent")
-
-    FixedString Key;
-};
-
 struct SummonLifetimeComponent : public BaseComponent
 {
     DEFINE_COMPONENT(SummonLifetime, "eoc::summon::LifetimeComponent")
@@ -680,6 +663,77 @@ struct HotbarCurrentDecksComponent : public BaseComponent
     DEFINE_COMPONENT(HotbarDecks, "eoc::hotbar::CurrentDecksComponent")
 
     HashMap<FixedString, int32_t> Decks;
+};
+
+END_NS()
+
+BEGIN_NS(eoc::lock)
+
+struct LockComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(Lock, "eoc::lock::LockComponent")
+
+    FixedString Key_M;
+    int LockDC;
+    [[bg3::legacy(field_8)]] Guid LockDifficultyClassID;
+    Array<Guid> field_18;
+};
+
+struct KeyComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(Key, "eoc::lock::KeyComponent")
+
+    FixedString Key;
+};
+
+DEFINE_TAG_COMPONENT(eoc::lock, AnimationStateComponent, LockAnimationState)
+DEFINE_TAG_COMPONENT(eoc::lock, LifetimeComponent, LockLifetime)
+
+END_NS()
+
+BEGIN_NS(esv::lock)
+
+struct LockpickingStateComponent : public BaseComponent
+{
+    DEFINE_COMPONENT(ServerLockpickingState, "esv::lock::LockpickingStateComponent")
+
+    EntityHandle Entity;
+    uint8_t State;
+    EntityHandle Target;
+    EntityHandle Target2;
+    glm::vec3 Position;
+    EntityHandle Roll;
+    int RequestId;
+    float ScriptPermissionTimeRemaining;
+    float ActionResourceSpendTimeRemaining;
+    Guid ActionResource;
+    Guid SteeringState;
+    float ActiveRollWaitTimeRemaining;
+};
+
+struct ScriptPermissionResponse
+{
+    EntityHandle Entity;
+    int RequestId;
+    bool Response;
+};
+
+struct PickLockRequest
+{
+    EntityHandle Player;
+    EntityHandle Target;
+    EntityHandle field_10;
+};
+
+struct LockpickingSystem : public BaseSystem
+{
+    DEFINE_SYSTEM(ServerLockpicking, "esv::lock::LockpickingSystem")
+
+    [[bg3::hidden]] void* ImmutableDataHeadmaster;
+    [[bg3::hidden]] UnknownFunction SignalCollection;
+    Array<PickLockRequest> PickLockRequests;
+    Array<ScriptPermissionResponse> ScriptPermissionResponses;
+    [[bg3::hidden]] Array<void*> ActiveRollFinishedEvents;
 };
 
 END_NS()
