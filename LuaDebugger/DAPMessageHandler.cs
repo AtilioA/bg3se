@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Linq;
 using System.Net.Http.Headers;
@@ -39,6 +40,7 @@ namespace NSE.DebuggerFrontend
 
         public void Reset()
         {
+            Active = false;
             Stack = null;
             Stopped = false;
         }
@@ -69,11 +71,18 @@ namespace NSE.DebuggerFrontend
 
     public class DAPMessageHandler
     {
-        // DBG protocol version (game/editor backend to debugger frontend communication)
-        private const UInt32 DBGProtocolVersion = 4;
+        private class PendingControl
+        {
+            public DAPRequest Request;
+            public DbgContext Context;
+            public DbgContinue.Types.Action Action;
+        }
 
-        // DAP protocol version (VS Code to debugger frontend communication)
-        private const int DAPProtocolVersion = 1;
+        // DBG protocol version (game/editor backend to debugger frontend communication)
+        private const UInt32 DBGProtocolVersion = 5;
+        private const UInt32 StockProtocolVersion = 4;
+        private const int ProbeTimeoutMs = 3000;
+        private const UInt64 RequiredCapabilities = 1UL << 0;
 
         // DAP thread ID for Lua server context
         private const int ServerThreadId = 1;
@@ -102,23 +111,129 @@ namespace NSE.DebuggerFrontend
 
         private ExpressionEvaluator Evaluator;
         private DAPRequest PendingLaunchRequest;
+        private bool PairCompatible;
+        private bool StockNativeMode;
+        private string NativeMode;
+        private string BackendHost;
+        private int BackendPort;
+        private BkConnectResponse BackendHandshake;
+        private bool InitializedSent;
+        private readonly object HandshakeLock = new object();
         private DAPRequest PendingLoadedSourcesRequest;
+        private readonly BlockingCollection<Action> StateQueue = new BlockingCollection<Action>();
+        private readonly Thread StateOwnerThread;
+        private volatile int StateOwnerThreadId;
+        private volatile bool SessionClosed;
+        private bool TerminationSent;
+        private readonly HashSet<DbgContext> InitialContexts = new HashSet<DbgContext>();
+        private readonly Dictionary<DbgContext, BkContextUpdated.Types.Status> ContextStates = new Dictionary<DbgContext, BkContextUpdated.Types.Status>();
+        private readonly Dictionary<uint, PendingControl> PendingControls = new Dictionary<uint, PendingControl>();
+        private bool ContextsReady;
 
 
         public DAPMessageHandler(DAPStream stream)
         {
             Stream = stream;
             Stream.MessageReceived += this.MessageReceived;
+            Stream.InputClosed += this.InputClosed;
             ServerState = new ThreadState();
             ServerState.Context = DbgContext.Server;
             ClientState = new ThreadState();
             ClientState.Context = DbgContext.Client;
             Evaluator = new ExpressionEvaluator(this);
+            StateOwnerThread = new Thread(StateOwnerMain)
+            {
+                IsBackground = true,
+                Name = "DAP state owner"
+            };
+            StateOwnerThread.Start();
         }
 
         public void EnableLogging(Stream logStream)
         {
             LogStream = logStream;
+        }
+
+        private void StateOwnerMain()
+        {
+            StateOwnerThreadId = Thread.CurrentThread.ManagedThreadId;
+            foreach (var action in StateQueue.GetConsumingEnumerable())
+            {
+                try
+                {
+                    if (!SessionClosed)
+                    {
+                        action();
+                    }
+                }
+                catch (Exception e)
+                {
+                    LogError(e.ToString());
+                    CloseSession(false, e);
+                }
+            }
+        }
+
+        private bool PostOnState(Action action)
+        {
+            if (SessionClosed || StateQueue.IsAddingCompleted)
+            {
+                return false;
+            }
+            try
+            {
+                StateQueue.Add(action);
+                return true;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private void InvokeOnState(Action action)
+        {
+            if (Thread.CurrentThread.ManagedThreadId == StateOwnerThreadId)
+            {
+                action();
+                return;
+            }
+            if (SessionClosed || StateQueue.IsAddingCompleted)
+            {
+                return;
+            }
+
+            Exception error = null;
+            using (var completed = new ManualResetEventSlim(false))
+            {
+                var queued = PostOnState(() =>
+                {
+                    try
+                    {
+                        if (!SessionClosed)
+                        {
+                            action();
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        error = e;
+                    }
+                    finally
+                    {
+                        completed.Set();
+                    }
+                });
+                if (!queued)
+                {
+                    return;
+                }
+                completed.Wait();
+            }
+            if (error != null)
+            {
+                throw error;
+            }
         }
 
         /*private void SendBreakpoint(string eventType, Breakpoint bp)
@@ -157,6 +272,11 @@ namespace NSE.DebuggerFrontend
 
         private void MessageReceived(DAPMessage message)
         {
+            InvokeOnState(() => MessageReceivedOnState(message));
+        }
+
+        private void MessageReceivedOnState(DAPMessage message)
+        {
             if (message is DAPRequest)
             {
                 try
@@ -166,6 +286,16 @@ namespace NSE.DebuggerFrontend
                 catch (RequestFailedException e)
                 {
                     Stream.SendReply(message as DAPRequest, e.Message);
+                }
+                catch (IOException e)
+                {
+                    Stream.SendReply(message as DAPRequest, e.Message);
+                    CloseSession(false, e);
+                }
+                catch (SocketException e)
+                {
+                    Stream.SendReply(message as DAPRequest, e.Message);
+                    CloseSession(false, e);
                 }
                 catch (Exception e)
                 {
@@ -185,6 +315,89 @@ namespace NSE.DebuggerFrontend
             else
             {
                 throw new InvalidDataException("DAP replies not handled");
+            }
+        }
+
+        private void InputClosed()
+        {
+            PostOnState(() => CloseSession(true, null));
+        }
+
+        private void CloseSession(bool expected, Exception error)
+        {
+            if (SessionClosed)
+            {
+                return;
+            }
+
+            SessionClosed = true;
+            PairCompatible = false;
+            ContextsReady = false;
+            InitializedSent = false;
+            InitialContexts.Clear();
+            ContextStates.Clear();
+
+            DAPRequest pendingLaunch;
+            lock (HandshakeLock)
+            {
+                pendingLaunch = PendingLaunchRequest;
+                PendingLaunchRequest = null;
+            }
+            if (pendingLaunch != null)
+            {
+                Stream.SendReply(pendingLaunch,
+                    new string(new[] { 'd', 'e', 'b', 'u', 'g', 'g', 'e', 'r', '_', 'c', 'l', 'o', 's', 'e', 'd' }));
+            }
+
+            foreach (var request in PendingSourceRequests.Values.ToList())
+            {
+                Stream.SendReply(request, Evaluator.BackendError(StatusCode.StaleContext));
+            }
+            PendingSourceRequests.Clear();
+
+            if (PendingLoadedSourcesRequest != null)
+            {
+                Stream.SendReply(PendingLoadedSourcesRequest, Evaluator.BackendError(StatusCode.StaleContext));
+                PendingLoadedSourcesRequest = null;
+            }
+
+            foreach (var control in PendingControls.Values.ToList())
+            {
+                Stream.SendReply(control.Request, Evaluator.BackendError(StatusCode.StaleContext));
+            }
+            PendingControls.Clear();
+            Evaluator.InvalidateAll();
+
+            ServerState.Reset();
+            ClientState.Reset();
+
+            if (error != null && !expected)
+            {
+                LogError(error.ToString());
+            }
+            if (!expected && !TerminationSent)
+            {
+                TerminationSent = true;
+                Stream.SendEvent(new string(new[] { 't', 'e', 'r', 'm', 'i', 'n', 'a', 't', 'e', 'd' }),
+                    new DAPTerminatedEvent());
+            }
+
+            if (DbgCli != null)
+            {
+                DbgCli.Close();
+            }
+            else if (DbgClient != null)
+            {
+                DbgClient.Close();
+            }
+
+            Stream.Close();
+            try
+            {
+                StateQueue.CompleteAdding();
+            }
+            catch (InvalidOperationException)
+            {
             }
         }
 
@@ -240,17 +453,118 @@ namespace NSE.DebuggerFrontend
 
         private void OnBackendConnected(BkConnectResponse response)
         {
-            if (response.ProtocolVersion != DBGProtocolVersion)
+            DAPRequest pendingLaunch;
+            string mismatchCode;
+            DAPBG3SEHandshake details;
+            lock (HandshakeLock)
             {
-                Stream.SendReply(PendingLaunchRequest, $"Backend sent unsupported protocol version; got {response.ProtocolVersion}, we only support {DBGProtocolVersion}");
-            } 
-            else
-            {
-                var reply = new DAPLaunchResponse();
-                Stream.SendReply(PendingLaunchRequest, reply);
+                if (PendingLaunchRequest == null)
+                {
+                    return;
+                }
+                BackendHandshake = response;
+                mismatchCode = StockNativeMode
+                    ? GetStockMismatchCode(response)
+                    : GetPairMismatchCode(response);
+                PairCompatible = mismatchCode == null && !StockNativeMode;
+                pendingLaunch = PendingLaunchRequest;
+                PendingLaunchRequest = null;
+                details = MakeLaunchHandshakeDetails(response);
+                details.mismatchCode = mismatchCode;
             }
 
-            PendingLaunchRequest = null;
+            if (mismatchCode != null)
+            {
+                Stream.SendReply(pendingLaunch, $"BG3SE debugger pair is incompatible: {mismatchCode}",
+                    new DAPLaunchResponse { bg3se = details });
+                CloseSession(false, new InvalidDataException(mismatchCode));
+            }
+            else
+            {
+                Stream.SendReply(pendingLaunch, new DAPLaunchResponse { bg3se = details });
+                if (StockNativeMode)
+                {
+                    CompleteBackendReadyStock();
+                }
+            }
+        }
+
+        private DAPBG3SEHandshake MakeHandshakeDetails(BkConnectResponse response = null)
+        {
+            return new DAPBG3SEHandshake
+            {
+                adapterPairIdentity = DebuggerPairIdentity.Value,
+                backendPairIdentity = response?.BackendPairIdentity,
+                adapterProtocolVersion = StockNativeMode ? StockProtocolVersion : DBGProtocolVersion,
+                backendProtocolVersion = response?.ProtocolVersion,
+                requiredCapabilities = RequiredCapabilities,
+                availableCapabilities = response?.Capabilities,
+                nativeMode = NativeMode
+            };
+        }
+
+        private DAPBG3SEHandshake MakeLaunchHandshakeDetails(BkConnectResponse response = null)
+        {
+            var details = MakeHandshakeDetails(response);
+            if (response == null)
+            {
+                details.backendPairIdentity = null;
+                details.backendProtocolVersion = null;
+                details.availableCapabilities = null;
+            }
+            return details;
+        }
+
+        private string GetPairMismatchCode(BkConnectResponse response)
+        {
+            if (response == null || response.ProtocolVersion == 0 || String.IsNullOrWhiteSpace(response.BackendPairIdentity))
+            {
+                return "handshake_missing";
+            }
+            if (response.ProtocolVersion != DBGProtocolVersion)
+            {
+                return "protocol_mismatch";
+            }
+            if (response.BackendPairIdentity != DebuggerPairIdentity.Value)
+            {
+                return "build_identity_mismatch";
+            }
+            if ((response.Capabilities & RequiredCapabilities) != RequiredCapabilities)
+            {
+                return "capabilities_incompatible";
+            }
+            return null;
+        }
+
+        private string GetStockMismatchCode(BkConnectResponse response)
+        {
+            if (response == null || response.ProtocolVersion != StockProtocolVersion)
+            {
+                return "protocol_mismatch";
+            }
+            return null;
+        }
+
+        private bool FailPendingHandshake(Exception error)
+        {
+            DAPRequest pendingLaunch;
+            BkConnectResponse backendHandshake;
+            lock (HandshakeLock)
+            {
+                if (PendingLaunchRequest == null)
+                {
+                    return false;
+                }
+                pendingLaunch = PendingLaunchRequest;
+                backendHandshake = BackendHandshake;
+                PendingLaunchRequest = null;
+            }
+            var details = MakeLaunchHandshakeDetails(backendHandshake);
+            details.mismatchCode = "handshake_missing";
+            Stream.SendReply(pendingLaunch, "BG3SE debugger handshake is missing",
+                new DAPLaunchResponse { bg3se = details });
+            LogError(error.ToString());
+            return true;
         }
 
         private void OnBreakpointTriggered(BkBreakpointTriggered bp)
@@ -326,8 +640,38 @@ namespace NSE.DebuggerFrontend
 
         private void OnContextUpdated(BkContextUpdated msg)
         {
+            if (msg.Context != DbgContext.Server && msg.Context != DbgContext.Client)
+            {
+                CloseSession(false, new InvalidDataException());
+                return;
+            }
+            if (msg.Status != BkContextUpdated.Types.Status.Loaded
+                && msg.Status != BkContextUpdated.Types.Status.Unloaded)
+            {
+                CloseSession(false, new InvalidDataException());
+                return;
+            }
             var ctx = msg.Context == DbgContext.Server ? ServerState : ClientState;
             var active = msg.Status == BkContextUpdated.Types.Status.Loaded;
+            var initial = !InitialContexts.Contains(msg.Context);
+
+            if (ContextStates.TryGetValue(msg.Context, out var previous))
+            {
+                if (previous == msg.Status)
+                {
+                    return;
+                }
+                if (!ContextsReady)
+                {
+                    CloseSession(false, new InvalidDataException("conflicting context lifecycle event"));
+                    return;
+                }
+            }
+
+            if (initial)
+            {
+                InitialContexts.Add(msg.Context);
+            }
 
             if (ctx.Active != active)
             {
@@ -335,6 +679,51 @@ namespace NSE.DebuggerFrontend
             }
 
             ctx.Active = active;
+            ContextStates[msg.Context] = msg.Status;
+            Stream.SendEvent("bg3se/context", new DAPContextEvent
+            {
+                context = msg.Context == DbgContext.Server ? "server" : "client",
+                state = active ? "loaded" : "unloaded",
+                initial = initial
+            });
+            if (!active)
+            {
+                InvalidateContext(msg.Context);
+            }
+
+            if (!ContextsReady && InitialContexts.Contains(DbgContext.Server)
+                && InitialContexts.Contains(DbgContext.Client))
+            {
+                ContextsReady = true;
+                Stream.SendEvent("bg3se/contextsReady", new DAPContextsReadyEvent());
+            }
+        }
+
+        private void InvalidateContext(DbgContext context)
+        {
+            Evaluator.InvalidateContext(context);
+
+            var controls = PendingControls
+                .Where(pair => pair.Value.Context == context)
+                .Select(pair => pair.Key)
+                .ToList();
+            foreach (var seq in controls)
+            {
+                var pending = PendingControls[seq];
+                PendingControls.Remove(seq);
+                Stream.SendReply(pending.Request, Evaluator.BackendError(StatusCode.StaleContext));
+            }
+
+            foreach (var request in PendingSourceRequests.Values.ToList())
+            {
+                Stream.SendReply(request, Evaluator.BackendError(StatusCode.StaleContext));
+            }
+            PendingSourceRequests.Clear();
+            if (PendingLoadedSourcesRequest != null)
+            {
+                Stream.SendReply(PendingLoadedSourcesRequest, Evaluator.BackendError(StatusCode.StaleContext));
+                PendingLoadedSourcesRequest = null;
+            }
         }
 
         private void OnModInfo(BkModInfoResponse msg)
@@ -395,7 +784,41 @@ namespace NSE.DebuggerFrontend
             if (PendingSourceRequests.TryGetValue(seq, out DAPRequest sourceReq))
             {
                 PendingSourceRequests.Remove(seq);
+                if (msg.StatusCode == StatusCode.StaleContext)
+                {
+                    Stream.SendReply(sourceReq, Evaluator.BackendError(msg.StatusCode));
+                    return;
+                }
                 Stream.SendReply(sourceReq, $"Fetch failed: {msg.StatusCode}");
+                return;
+            }
+
+            if (PendingControls.TryGetValue(seq, out PendingControl control))
+            {
+                PendingControls.Remove(seq);
+                if (msg.StatusCode != StatusCode.Success)
+                {
+                    Stream.SendReply(control.Request, Evaluator.BackendError(msg.StatusCode));
+                    return;
+                }
+
+                var state = GetThread(control.Context);
+                if (control.Action != DbgContinue.Types.Action.Pause)
+                {
+                    state.Stopped = false;
+                    state.Stack = null;
+                    Stream.SendEvent(new string(new[] { 'c', 'o', 'n', 't', 'i', 'n', 'u', 'e', 'd' }),
+                        new DAPContinuedEvent
+                        {
+                            threadId = GetThreadId(control.Context),
+                            allThreadsContinued = false
+                        });
+                }
+                Stream.SendReply(control.Request, new DAPContinueResponse
+                {
+                    allThreadsContinued = false
+                });
+                return;
             }
 
             Evaluator.OnResultsReceived(seq, msg);
@@ -403,16 +826,69 @@ namespace NSE.DebuggerFrontend
 
         private void OnDebuggerReady(BkDebuggerReady msg)
         {
+            bool lifecycleMissing;
+            lock (HandshakeLock)
+            {
+                lifecycleMissing = PairCompatible && PendingLaunchRequest == null && !ContextsReady;
+                if (!PairCompatible || PendingLaunchRequest != null || lifecycleMissing)
+                {
+                    if (!lifecycleMissing)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            if (lifecycleMissing)
+            {
+                CloseSession(false, new InvalidDataException());
+                return;
+            }
+
+            CompleteBackendReady();
+        }
+
+        private void CompleteBackendReady()
+        {
+            lock (HandshakeLock)
+            {
+                if (InitializedSent || !ContextsReady)
+                {
+                    return;
+                }
+                InitializedSent = true;
+            }
+            SendInitialized("Debugger backend ready\r\n");
+        }
+
+        private void CompleteBackendReadyStock()
+        {
+            lock (HandshakeLock)
+            {
+                if (InitializedSent)
+                {
+                    return;
+                }
+                InitializedSent = true;
+            }
+            SendInitialized("Debugger backend ready (stock native mode)\r\n");
+        }
+
+        private void SendInitialized(string notice)
+        {
             DbgCli.SendUpdateSettings(Config.breakOnError, Config.breakOnGenericError);
 
-            SendOutput("console", "Debugger backend ready\r\n");
+            SendOutput("console", notice);
 
             var initializedEvt = new DAPInitializedEvent();
             Stream.SendEvent("initialized", initializedEvt);
         }
         private void OnSourceResponse(UInt32 seq, BkSourceResponse msg)
         {
-            var dapRequest = PendingSourceRequests[seq];
+            if (!PendingSourceRequests.TryGetValue(seq, out DAPRequest dapRequest))
+            {
+                return;
+            }
             PendingSourceRequests.Remove(seq);
 
             var reply = new DAPSourceResponse
@@ -429,15 +905,10 @@ namespace NSE.DebuggerFrontend
                 supportsConfigurationDoneRequest = true,
                 supportsEvaluateForHovers = true,
                 supportsModulesRequest = true,
-                supportsLoadedSourcesRequest = true
+                supportsLoadedSourcesRequest = true,
+                bg3se = MakeHandshakeDetails()
             };
             Stream.SendReply(request, reply);
-
-            var versionInfo = new DAPCustomVersionInfoEvent
-            {
-                version = DAPProtocolVersion
-            };
-            Stream.SendEvent("luaProtocolVersion", versionInfo);
         }
 
         private void DebugThreadMain()
@@ -448,8 +919,64 @@ namespace NSE.DebuggerFrontend
             }
             catch (Exception e)
             {
-                LogError(e.ToString());
-                Environment.Exit(2);
+                PostOnState(() =>
+                {
+                    FailPendingHandshake(e);
+                    CloseSession(false, e);
+                });
+            }
+        }
+
+        private void StartBackendReader()
+        {
+            DbgThread = new Thread(new ThreadStart(DebugThreadMain));
+            DbgThread.Start();
+        }
+
+        /// <summary>
+        /// One-shot backend probe used to classify the running extender build.
+        /// A paired (custom) backend accepts DBGProtocolVersion and returns its
+        /// identity. A stock backend replies with StockProtocolVersion and then
+        /// disconnects, so the echoed version identifies the mode without any
+        /// timeout race.
+        /// </summary>
+        private BkConnectResponse ProbeBackend(string host, int port, UInt32 protocolVersion, string pairIdentity, UInt64 requiredCapabilities)
+        {
+            var client = new AsyncProtobufClient(host, port);
+            var done = new TaskCompletionSource<BkConnectResponse>();
+            var cli = new DebuggerClient(client)
+            {
+                OnBackendConnected = response => done.TrySetResult(response)
+            };
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    client.RunLoop();
+                    done.TrySetResult(null);
+                }
+                catch (Exception)
+                {
+                    done.TrySetResult(null);
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "Backend probe"
+            };
+            thread.Start();
+            try
+            {
+                cli.SendConnectRequest(protocolVersion, pairIdentity, requiredCapabilities);
+                if (done.Task.Wait(ProbeTimeoutMs))
+                {
+                    return done.Task.Result;
+                }
+                return null;
+            }
+            finally
+            {
+                client.Close();
             }
         }
 
@@ -472,6 +999,42 @@ namespace NSE.DebuggerFrontend
                 throw new RequestFailedException("Cannot attach to game with debugging disabled");
             }
 
+            BackendHost = launch.backendHost;
+            BackendPort = launch.backendPort;
+
+            // Classify the backend: paired custom build (v5) or stock build (v4).
+            BkConnectResponse pairedResponse;
+            try
+            {
+                pairedResponse = ProbeBackend(launch.backendHost, launch.backendPort,
+                    DBGProtocolVersion, DebuggerPairIdentity.Value, RequiredCapabilities);
+            }
+            catch (SocketException e)
+            {
+                throw new RequestFailedException("Could not connect to Lua debugger backend: " + e.Message);
+            }
+
+            bool usePair = pairedResponse != null
+                && pairedResponse.ProtocolVersion == DBGProtocolVersion
+                && !String.IsNullOrWhiteSpace(pairedResponse.BackendPairIdentity);
+            if (!usePair && pairedResponse != null
+                && pairedResponse.ProtocolVersion != StockProtocolVersion)
+            {
+                // A live backend answered with an unknown protocol; do not guess.
+                throw new RequestFailedException(
+                    $"Lua debugger backend reported unsupported protocol version {pairedResponse.ProtocolVersion}");
+            }
+            if (usePair)
+            {
+                var mismatch = GetPairMismatchCode(pairedResponse);
+                if (mismatch != null)
+                {
+                    throw new RequestFailedException($"BG3SE debugger pair is incompatible: {mismatch}");
+                }
+            }
+            StockNativeMode = !usePair;
+            NativeMode = usePair ? "paired" : "stock";
+
             try
             {
                 DbgClient = new AsyncProtobufClient(launch.backendHost, launch.backendPort);
@@ -483,28 +1046,48 @@ namespace NSE.DebuggerFrontend
 
             DbgCli = new DebuggerClient(DbgClient)
             {
-                OnBackendConnected = this.OnBackendConnected,
-                OnBreakpointTriggered = this.OnBreakpointTriggered,
-                OnEvaluateFinished = Evaluator.OnEvaluateFinished,
-                OnContextUpdated = this.OnContextUpdated,
-                OnModInfo = this.OnModInfo,
-                OnDebugOutput = this.OnDebugOutput,
-                OnResults = this.OnResults,
-                OnDebuggerReady = this.OnDebuggerReady,
-                OnSourceResponse = this.OnSourceResponse,
-                OnGetVariablesFinished = Evaluator.OnGetVariablesFinished
+                OnBackendConnected = response => PostOnState(() => OnBackendConnected(response)),
+                OnBreakpointTriggered = bp => PostOnState(() => OnBreakpointTriggered(bp)),
+                OnEvaluateFinished = (seq, msg) => PostOnState(() => Evaluator.OnEvaluateFinished(seq, msg)),
+                OnContextUpdated = msg => PostOnState(() => OnContextUpdated(msg)),
+                OnModInfo = msg => PostOnState(() => OnModInfo(msg)),
+                OnDebugOutput = msg => PostOnState(() => OnDebugOutput(msg)),
+                OnResults = (seq, msg) => PostOnState(() => OnResults(seq, msg)),
+                OnDebuggerReady = msg => PostOnState(() => OnDebuggerReady(msg)),
+                OnSourceResponse = (seq, msg) => PostOnState(() => OnSourceResponse(seq, msg)),
+                OnGetVariablesFinished = (seq, msg) => PostOnState(() => Evaluator.OnGetVariablesFinished(seq, msg))
             };
             if (LogStream != null)
             {
                 DbgCli.EnableLogging(LogStream);
             }
             
-            DbgCli.SendConnectRequest(DBGProtocolVersion);
+            lock (HandshakeLock)
+            {
+                PendingLaunchRequest = request;
+                PairCompatible = false;
+                BackendHandshake = null;
+                InitializedSent = false;
+            }
 
-            DbgThread = new Thread(new ThreadStart(DebugThreadMain));
-            DbgThread.Start();
+            try
+            {
+                if (!StockNativeMode)
+                {
+                    DbgCli.SendConnectRequest(DBGProtocolVersion,
+                        DebuggerPairIdentity.Value, RequiredCapabilities);
+                }
+                else
+                {
+                    DbgCli.SendConnectRequest(StockProtocolVersion, "", 0);
+                }
+                StartBackendReader();
+            }
+            catch (Exception e)
+            {
+                FailPendingHandshake(e);
+            }
 
-            PendingLaunchRequest = request;
         }
 
         private void SendBreakpointUpdate()
@@ -729,16 +1312,15 @@ namespace NSE.DebuggerFrontend
                     throw new RequestFailedException("Already running");
                 }
 
-                state.Stopped = false;
             }
 
-            SendContinue(state.Context, action);
-
-            var reply = new DAPContinueResponse
+            var pending = new PendingControl
             {
-                allThreadsContinued = false
+                Request = request,
+                Context = state.Context,
+                Action = action
             };
-            Stream.SendReply(request, reply);
+            DbgCli.SendContinue(state.Context, action, seq => PendingControls.Add(seq, pending));
         }
 
         private void HandleEvaluateRequest(DAPRequest request, DAPEvaulateRequest msg)
@@ -782,8 +1364,7 @@ namespace NSE.DebuggerFrontend
             }
 
             var path = req.source.path.Length > 0 ? req.source.path : req.source.name;
-            var seqId = DbgCli.SendSourceRequest(path);
-            PendingSourceRequests.Add(seqId, request);
+            DbgCli.SendSourceRequest(path, seq => PendingSourceRequests.Add(seq, request));
         }
 
         private void HandleLoadedSourcesRequest(DAPRequest request, DAPLoadedSourcesRequest req)
@@ -848,7 +1429,7 @@ namespace NSE.DebuggerFrontend
         {
             var reply = new DAPEmptyPayload();
             Stream.SendReply(request, reply);
-            // TODO - close session
+            CloseSession(true, null);
         }
 
         private void HandleRequest(DAPRequest request)
@@ -943,3 +1524,4 @@ namespace NSE.DebuggerFrontend
         }
     }
 }
+

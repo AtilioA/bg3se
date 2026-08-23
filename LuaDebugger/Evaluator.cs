@@ -69,6 +69,8 @@ namespace NSE.DebuggerFrontend
         // Backend sequence ID => original DAP request map
         private Dictionary<uint, EvalRequestHandlerDelegate> PendingEvalRequests = new Dictionary<uint, EvalRequestHandlerDelegate>();
         private Dictionary<uint, GetVariablesRequestHandlerDelegate> PendingGetVariablesRequests = new Dictionary<uint, GetVariablesRequestHandlerDelegate>();
+        private Dictionary<uint, DbgContext> PendingEvalContexts = new Dictionary<uint, DbgContext>();
+        private Dictionary<uint, DbgContext> PendingGetVariablesContexts = new Dictionary<uint, DbgContext>();
 
         // DAP variable references
         private Dictionary<int, BackendVariableReference> VariableRefs = new Dictionary<int, BackendVariableReference>();
@@ -161,7 +163,7 @@ namespace NSE.DebuggerFrontend
             // TODO req.filter, format
 
             var variables = new List<DAPVariable>();
-            for (var i = startIndex; i < startIndex + numVars; i++)
+            for (var i = startIndex; i < lastIndex; i++)
             {
                 var variable = response.Result[i];
                 var dapVar = new DAPVariable
@@ -217,9 +219,11 @@ namespace NSE.DebuggerFrontend
             varRef.VariableRef = -1;
             varRef.Frame = frameIndex;
             varRef.Local = -1;
-            uint seq = DAP.DbgCli.SendGetVariables(varRef);
-            PendingGetVariablesRequests.Add(seq, (uint replySeq, StatusCode status, BkGetVariablesResponse response) =>
+            DAP.DbgCli.SendGetVariables(varRef, seq =>
             {
+                PendingGetVariablesContexts.Add(seq, state.Context);
+                PendingGetVariablesRequests.Add(seq, (uint replySeq, StatusCode status, BkGetVariablesResponse response) =>
+                {
                 if (status == StatusCode.Success)
                 {
                     // Filter locals/upvalues based on requested scope type
@@ -235,8 +239,9 @@ namespace NSE.DebuggerFrontend
                 }
                 else
                 {
-                    DAP.Stream.SendReply(request, $"Backend returned error: {status}");
+                    DAP.Stream.SendReply(request, BackendError(status));
                 }
+                });
             });
         }
 
@@ -254,9 +259,11 @@ namespace NSE.DebuggerFrontend
                 throw new RequestFailedException("Cannot fetch variables when thread is not stopped");
             }
 
-            uint seq = DAP.DbgCli.SendGetVariables(varRef);
-            PendingGetVariablesRequests.Add(seq, (uint replySeq, StatusCode status, BkGetVariablesResponse response) =>
+            DAP.DbgCli.SendGetVariables(varRef, seq =>
             {
+                PendingGetVariablesContexts.Add(seq, varRef.Context);
+                PendingGetVariablesRequests.Add(seq, (uint replySeq, StatusCode status, BkGetVariablesResponse response) =>
+                {
                 if (status == StatusCode.Success)
                 {
                     OnVariablesReceived(request, msg, state, response);
@@ -267,8 +274,9 @@ namespace NSE.DebuggerFrontend
                 }
                 else
                 {
-                    DAP.Stream.SendReply(request, $"Backend returned error: {status}");
+                    DAP.Stream.SendReply(request, BackendError(status));
                 }
+                });
             });
         }
 
@@ -342,9 +350,11 @@ namespace NSE.DebuggerFrontend
             }
 
             // TODO - evaluate in frame in later versions
-            uint seq = DAP.DbgCli.SendEvaluate(state.Context, frameIndex, req.expression);
-            PendingEvalRequests.Add(seq, (uint replySeq, StatusCode status, BkEvaluateResponse response) =>
+            DAP.DbgCli.SendEvaluate(state.Context, frameIndex, req.expression, seq =>
             {
+                PendingEvalContexts.Add(seq, state.Context);
+                PendingEvalRequests.Add(seq, (uint replySeq, StatusCode status, BkEvaluateResponse response) =>
+                {
                 if (status == StatusCode.Success)
                 {
                     ReceivedEvaluateResponse(request, req, state, response);
@@ -355,8 +365,9 @@ namespace NSE.DebuggerFrontend
                 }
                 else
                 {
-                    DAP.Stream.SendReply(request, $"Backend returned error: {status}");
+                    DAP.Stream.SendReply(request, BackendError(status));
                 }
+                });
             });
         }
 
@@ -365,6 +376,7 @@ namespace NSE.DebuggerFrontend
             if (PendingEvalRequests.TryGetValue(seq, out EvalRequestHandlerDelegate handler))
             {
                 PendingEvalRequests.Remove(seq);
+                PendingEvalContexts.Remove(seq);
                 if (msg.ErrorMessage.Length > 0)
                 {
                     handler(seq, StatusCode.EvalFailed, msg);
@@ -373,10 +385,6 @@ namespace NSE.DebuggerFrontend
                 {
                     handler(seq, StatusCode.Success, msg);
                 }
-            }
-            else
-            {
-                DAP.LogError($"Response received for evaluate request {seq} that is not pending?");
             }
         }
 
@@ -385,6 +393,7 @@ namespace NSE.DebuggerFrontend
             if (PendingGetVariablesRequests.TryGetValue(seq, out GetVariablesRequestHandlerDelegate handler))
             {
                 PendingGetVariablesRequests.Remove(seq);
+                PendingGetVariablesContexts.Remove(seq);
                 if (msg.ErrorMessage.Length > 0)
                 {
                     handler(seq, StatusCode.EvalFailed, msg);
@@ -394,10 +403,6 @@ namespace NSE.DebuggerFrontend
                     handler(seq, StatusCode.Success, msg);
                 }
             }
-            else
-            {
-                DAP.LogError($"Response received for variables request {seq} that is not pending?");
-            }
         }
 
         public void OnResultsReceived(UInt32 seq, BkResult msg)
@@ -405,14 +410,93 @@ namespace NSE.DebuggerFrontend
             if (PendingEvalRequests.TryGetValue(seq, out EvalRequestHandlerDelegate handler))
             {
                 PendingEvalRequests.Remove(seq);
+                PendingEvalContexts.Remove(seq);
                 handler(seq, msg.StatusCode, null);
             }
 
             if (PendingGetVariablesRequests.TryGetValue(seq, out GetVariablesRequestHandlerDelegate varHandler))
             {
                 PendingGetVariablesRequests.Remove(seq);
+                PendingGetVariablesContexts.Remove(seq);
                 varHandler(seq, msg.StatusCode, null);
             }
         }
+
+        public string BackendError(StatusCode status)
+        {
+            return status == StatusCode.StaleContext
+                ? "stale_context"
+                : $"Backend returned error: {status}";
+        }
+
+        public void InvalidateContext(DbgContext context)
+        {
+            var evalSeqs = PendingEvalContexts
+                .Where(pair => pair.Value == context)
+                .Select(pair => pair.Key)
+                .ToList();
+            foreach (var seq in evalSeqs)
+            {
+                if (PendingEvalRequests.TryGetValue(seq, out EvalRequestHandlerDelegate handler))
+                {
+                    PendingEvalRequests.Remove(seq);
+                    PendingEvalContexts.Remove(seq);
+                    handler(seq, StatusCode.StaleContext, null);
+                }
+            }
+
+            var variableSeqs = PendingGetVariablesContexts
+                .Where(pair => pair.Value == context)
+                .Select(pair => pair.Key)
+                .ToList();
+            foreach (var seq in variableSeqs)
+            {
+                if (PendingGetVariablesRequests.TryGetValue(seq, out GetVariablesRequestHandlerDelegate handler))
+                {
+                    PendingGetVariablesRequests.Remove(seq);
+                    PendingGetVariablesContexts.Remove(seq);
+                    handler(seq, StatusCode.StaleContext, null);
+                }
+            }
+
+            var refs = VariableRefs
+                .Where(pair => pair.Value.Context == context)
+                .Select(pair => pair.Key)
+                .ToList();
+            foreach (var reference in refs)
+            {
+                VariableRefs.Remove(reference);
+            }
+        }
+
+        public void InvalidateAll()
+        {
+            var evalSeqs = PendingEvalRequests.Keys.ToList();
+            foreach (var seq in evalSeqs)
+            {
+                if (PendingEvalRequests.TryGetValue(seq, out EvalRequestHandlerDelegate handler))
+                {
+                    handler(seq, StatusCode.StaleContext, null);
+                }
+            }
+            var variableSeqs = PendingGetVariablesRequests.Keys.ToList();
+            foreach (var seq in variableSeqs)
+            {
+                if (PendingGetVariablesRequests.TryGetValue(seq, out GetVariablesRequestHandlerDelegate handler))
+                {
+                    handler(seq, StatusCode.StaleContext, null);
+                }
+            }
+            PendingEvalRequests.Clear();
+            PendingGetVariablesRequests.Clear();
+            PendingEvalContexts.Clear();
+            PendingGetVariablesContexts.Clear();
+            VariableRefs.Clear();
+            NextVariableReference = 1;
+        }
     }
 }
+
+
+
+

@@ -23,7 +23,34 @@ namespace NSE.DebuggerFrontend
 
                 var dapHandler = new DAPMessageHandler(dap);
                 dapHandler.EnableLogging(logFile);
-                dap.RunLoop();
+                var dapThread = new Thread(() =>
+                {
+                    try
+                    {
+                        dap.RunLoop();
+                    }
+                    catch (Exception e)
+                    {
+                        dap.SendEvent("output", new DAPOutputMessage
+                        {
+                            category = "important",
+                            output = e.ToString()
+                        });
+                        if (logFile != null)
+                        {
+                            using (var writer = new StreamWriter(logFile, Encoding.UTF8, 0x1000, true))
+                            {
+                                writer.Write(e.ToString());
+                            }
+                        }
+                    }
+                })
+                {
+                    IsBackground = true,
+                    Name = "DAP input reader"
+                };
+                dapThread.Start();
+                dap.WaitForClose();
             }
             catch (Exception e)
             {

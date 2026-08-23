@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace NSE.DebuggerFrontend
@@ -15,10 +16,16 @@ namespace NSE.DebuggerFrontend
         private Stream LogStream;
 
         private Int32 OutgoingSeq = 1;
+        private readonly object OutputLock = new object();
         private Int32 IncomingSeq = 1;
+        private bool Closed;
+        private bool CloseNotified;
+        private readonly ManualResetEventSlim CloseSignal = new ManualResetEventSlim(false);
 
         public delegate void MessageReceivedDelegate(DAPMessage message);
         public MessageReceivedDelegate MessageReceived = delegate { };
+        public delegate void StreamClosedDelegate();
+        public StreamClosedDelegate InputClosed = delegate { };
 
         public DAPStream()
         {
@@ -98,6 +105,8 @@ namespace NSE.DebuggerFrontend
 
         public void RunLoop()
         {
+            try
+            {
             var lineRe = new Regex("^([^:]*):\\s*(.*)$", RegexOptions.Compiled);
 
             while (true)
@@ -108,6 +117,7 @@ namespace NSE.DebuggerFrontend
                     var line = InputReader.ReadLine();
                     if (line == null && InputReader.EndOfStream)
                     {
+                        NotifyClosed();
                         return;
                     }
 
@@ -141,25 +151,77 @@ namespace NSE.DebuggerFrontend
 
                 ProcessPayload(payload);
             }
+            }
+            catch (Exception)
+            {
+                NotifyClosed();
+                throw;
+            }
         }
 
         public void Send(DAPMessage message)
         {
-            message.seq = OutgoingSeq++;
-            var encoded = DAPMessageSerializer.Serialize(message);
-
-            if (LogStream != null)
+            lock (OutputLock)
             {
-                using (var writer = new StreamWriter(LogStream, Encoding.UTF8, 0x1000, true))
+                if (Closed)
                 {
-                    writer.Write(" DAP <<< ");
-                    writer.Write(encoded);
-                    writer.Write("\r\n");
+                    return;
                 }
-            }
+                message.seq = OutgoingSeq++;
+                var encoded = DAPMessageSerializer.Serialize(message);
 
-            Console.Write($"Content-Length: {encoded.Length}\r\n\r\n");
-            Console.Write(encoded);
+                if (LogStream != null)
+                {
+                    using (var writer = new StreamWriter(LogStream, Encoding.UTF8, 0x1000, true))
+                    {
+                        writer.Write(" DAP <<< ");
+                        writer.Write(encoded);
+                        writer.Write("\r\n");
+                    }
+                }
+
+                Console.Write($"Content-Length: {encoded.Length}\r\n\r\n");
+                Console.Write(encoded);
+            }
+        }
+
+        public void Close()
+        {
+            lock (OutputLock)
+            {
+                if (Closed)
+                {
+                    return;
+                }
+                Closed = true;
+            }
+            CloseSignal.Set();
+            try
+            {
+                InputReader.Dispose();
+                Input.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        public void WaitForClose()
+        {
+            CloseSignal.Wait();
+        }
+
+        private void NotifyClosed()
+        {
+            lock (OutputLock)
+            {
+                if (CloseNotified)
+                {
+                    return;
+                }
+                CloseNotified = true;
+            }
+            InputClosed();
         }
 
         public void SendErrorReply(int requestSeq, string command, string errorText)
@@ -209,13 +271,22 @@ namespace NSE.DebuggerFrontend
 
         public void SendReply(DAPRequest request, string errorText)
         {
+            SendReply(request, errorText, null);
+        }
+
+        public void SendReply(DAPRequest request, string errorText, IDAPMessagePayload body)
+        {
+            if (request == null)
+                return;
+
             var reply = new DAPResponse
             {
                 type = "response",
                 request_seq = request.seq,
                 success = false,
                 command = request.command,
-                message = errorText
+                message = errorText,
+                body = body
             };
 
             Send(reply);

@@ -14,9 +14,36 @@ namespace NSE.DebuggerFrontend
         private TcpClient Socket;
         private byte[] MessageBuffer;
         private int BufferPos;
+        private readonly object SendLock = new object();
+        private bool Closed;
+
+        private void SendAll(byte[] buffer)
+        {
+            var sent = 0;
+            while (sent < buffer.Length)
+            {
+                var count = Socket.Client.Send(buffer, sent, buffer.Length - sent, SocketFlags.None);
+                if (count == 0)
+                {
+                    throw new EndOfStreamException("Debugger backend closed while sending a message");
+                }
+                sent += count;
+            }
+        }
 
         public delegate void MessageReceivedDelegate(BackendToDebugger message);
         public MessageReceivedDelegate MessageReceived = delegate { };
+
+        public bool IsClosed
+        {
+            get
+            {
+                lock (SendLock)
+                {
+                    return Closed;
+                }
+            }
+        }
 
         public AsyncProtobufClient(string host, int port)
         {
@@ -31,15 +58,12 @@ namespace NSE.DebuggerFrontend
         {
             while (true)
             {
-                try
+                int received = Socket.Client.Receive(MessageBuffer, BufferPos, MessageBuffer.Length - BufferPos, SocketFlags.Partial);
+                if (received == 0)
                 {
-                    int received = Socket.Client.Receive(MessageBuffer, BufferPos, MessageBuffer.Length - BufferPos, SocketFlags.Partial);
-                    BufferPos += received;
+                    throw new EndOfStreamException("Debugger backend closed before completing the handshake");
                 }
-                catch (SocketException e)
-                {
-                    throw e;
-                }
+                BufferPos += received;
 
                 while (BufferPos >= 4)
                 {
@@ -48,9 +72,9 @@ namespace NSE.DebuggerFrontend
                         | (MessageBuffer[2] << 16)
                         | (MessageBuffer[3] << 24);
 
-                    if (length >= 0x100000)
+                    if (length < 4 || length >= 0x100000)
                     {
-                        throw new InvalidDataException($"Message too long ({length} bytes)");
+                        throw new InvalidDataException($"Invalid message length ({length} bytes)");
                     }
 
                     if (BufferPos >= length)
@@ -74,19 +98,45 @@ namespace NSE.DebuggerFrontend
 
         public void Send(DebuggerToBackend message)
         {
-            using (var ms = new MemoryStream())
+            lock (SendLock)
             {
-                message.WriteTo(ms);
+                if (Closed)
+                {
+                    throw new EndOfStreamException("Debugger backend is closed");
+                }
+                using (var ms = new MemoryStream())
+                {
+                    message.WriteTo(ms);
 
-                var length = ms.Position + 4;
-                var lengthBuf = new byte[4];
-                lengthBuf[0] = (byte)(length & 0xff);
-                lengthBuf[1] = (byte)((length >> 8) & 0xff);
-                lengthBuf[2] = (byte)((length >> 16) & 0xff);
-                lengthBuf[3] = (byte)((length >> 24) & 0xff);
-                Socket.Client.Send(lengthBuf);
-                var payload = ms.ToArray();
-                Socket.Client.Send(payload);
+                    var length = ms.Position + 4;
+                    var lengthBuf = new byte[4];
+                    lengthBuf[0] = (byte)(length & 0xff);
+                    lengthBuf[1] = (byte)((length >> 8) & 0xff);
+                    lengthBuf[2] = (byte)((length >> 16) & 0xff);
+                    lengthBuf[3] = (byte)((length >> 24) & 0xff);
+                    SendAll(lengthBuf);
+                    var payload = ms.ToArray();
+                    SendAll(payload);
+                }
+            }
+        }
+
+        public void Close()
+        {
+            lock (SendLock)
+            {
+                if (Closed)
+                {
+                    return;
+                }
+                Closed = true;
+                try
+                {
+                    Socket.Close();
+                }
+                catch (Exception)
+                {
+                }
             }
         }
     }
@@ -97,6 +147,8 @@ namespace NSE.DebuggerFrontend
         private Stream LogStream;
         private UInt32 OutgoingSeq = 1;
         private UInt32 IncomingSeq = 1;
+        private UInt32 PendingConnectSeq;
+        private readonly object SendLock = new object();
 
         public delegate void BackendConnectedDelegate(BkConnectResponse response);
         public BackendConnectedDelegate OnBackendConnected = delegate { };
@@ -154,24 +206,30 @@ namespace NSE.DebuggerFrontend
             }
         }
 
-        public UInt32 Send(DebuggerToBackend message)
+        public UInt32 Send(DebuggerToBackend message, Action<UInt32> beforeSend = null)
         {
-            message.SeqNo = OutgoingSeq++;
-            LogMessage(message);
-            Client.Send(message);
-            return message.SeqNo;
+            lock (SendLock)
+            {
+                message.SeqNo = OutgoingSeq++;
+                beforeSend?.Invoke(message.SeqNo);
+                LogMessage(message);
+                Client.Send(message);
+                return message.SeqNo;
+            }
         }
 
-        public void SendConnectRequest(UInt32 protocolVersion)
+        public void SendConnectRequest(UInt32 protocolVersion, string pairIdentity, UInt64 requiredCapabilities)
         {
             var msg = new DebuggerToBackend
             {
                 Connect = new DbgConnectRequest
                 {
-                    ProtocolVersion = protocolVersion
+                    ProtocolVersion = protocolVersion,
+                    AdapterPairIdentity = pairIdentity,
+                    RequiredCapabilities = requiredCapabilities
                 }
             };
-            Send(msg);
+            PendingConnectSeq = Send(msg, seq => PendingConnectSeq = seq);
         }
 
         public void SendSetBreakpoints(IEnumerable<BreakpointInfo> breakpoints)
@@ -207,7 +265,7 @@ namespace NSE.DebuggerFrontend
             Send(msg);
         }
 
-        public void SendContinue(DbgContext context, DbgContinue.Types.Action action)
+        public UInt32 SendContinue(DbgContext context, DbgContinue.Types.Action action, Action<UInt32> beforeSend = null)
         {
             var msg = new DebuggerToBackend
             {
@@ -217,10 +275,10 @@ namespace NSE.DebuggerFrontend
                     Action = action
                 }
             };
-            Send(msg);
+            return Send(msg, beforeSend);
         }
 
-        public UInt32 SendEvaluate(DbgContext context, int frameIndex, string expression)
+        public UInt32 SendEvaluate(DbgContext context, int frameIndex, string expression, Action<UInt32> beforeSend = null)
         {
             var msg = new DebuggerToBackend
             {
@@ -231,10 +289,10 @@ namespace NSE.DebuggerFrontend
                     Expression = expression
                 }
             };
-            return Send(msg);
+            return Send(msg, beforeSend);
         }
 
-        public UInt32 SendGetVariables(BackendVariableReference vref)
+        public UInt32 SendGetVariables(BackendVariableReference vref, Action<UInt32> beforeSend = null)
         {
             var eval = new DbgGetVariables
             {
@@ -268,10 +326,10 @@ namespace NSE.DebuggerFrontend
             {
                 GetVariables = eval
             };
-            return Send(msg);
+            return Send(msg, beforeSend);
         }
 
-        public UInt32 SendSourceRequest(string name)
+        public UInt32 SendSourceRequest(string name, Action<UInt32> beforeSend = null)
         {
             var msg = new DebuggerToBackend
             {
@@ -280,7 +338,7 @@ namespace NSE.DebuggerFrontend
                     Name = name
                 }
             };
-            return Send(msg);
+            return Send(msg, beforeSend);
         }
 
         public void SendReset(DbgContext context)
@@ -295,6 +353,11 @@ namespace NSE.DebuggerFrontend
             Send(msg);
         }
 
+        public void Close()
+        {
+            Client.Close();
+        }
+
         private void BreakpointTriggered(BkBreakpointTriggered message)
         {
             OnBreakpointTriggered(message);
@@ -302,6 +365,10 @@ namespace NSE.DebuggerFrontend
 
         private void MessageReceived(BackendToDebugger message)
         {
+            if (Client == null || Client.IsClosed)
+            {
+                return;
+            }
             LogMessage(message);
 
             if (message.SeqNo != IncomingSeq)
@@ -314,6 +381,11 @@ namespace NSE.DebuggerFrontend
             switch (message.MsgCase)
             {
                 case BackendToDebugger.MsgOneofCase.ConnectResponse:
+                    if (PendingConnectSeq == 0 || message.ReplySeqNo != PendingConnectSeq)
+                    {
+                        throw new InvalidDataException($"NSE connect response mismatch; got reply {message.ReplySeqNo} expected {PendingConnectSeq}");
+                    }
+                    PendingConnectSeq = 0;
                     OnBackendConnected(message.ConnectResponse);
                     break;
 
@@ -359,3 +431,5 @@ namespace NSE.DebuggerFrontend
         }
     }
 }
+
+
