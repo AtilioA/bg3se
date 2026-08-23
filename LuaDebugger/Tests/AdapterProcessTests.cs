@@ -192,296 +192,22 @@ namespace NSE.DebuggerFrontend.Tests
             return client;
         }
 
-        private static DebuggerToBackend ExpectConnect(
-            NetworkStream stream,
-            int expectedVersion,
-            string expectedIdentity,
-            int? replyVersion = null,
-            string replyIdentity = null)
+        private static void ExpectConnect(NetworkStream stream, int expectedVersion, int replyVersion)
         {
             var connect = ReadBackend(stream);
             Require(connect.MsgCase == DebuggerToBackend.MsgOneofCase.Connect,
                 "backend request was not connect");
             Require(connect.Connect.ProtocolVersion == expectedVersion,
                 $"adapter protocol was {connect.Connect.ProtocolVersion}, expected {expectedVersion}");
-            Require(connect.Connect.AdapterPairIdentity == expectedIdentity,
-                "adapter pair identity was unexpected");
             WriteBackend(stream, new BackendToDebugger
             {
                 SeqNo = 1,
                 ReplySeqNo = connect.SeqNo,
                 ConnectResponse = new BkConnectResponse
                 {
-                    ProtocolVersion = (UInt32)(replyVersion ?? expectedVersion),
-                    BackendPairIdentity = replyIdentity ?? expectedIdentity,
-                    Capabilities = (replyIdentity ?? expectedIdentity) == "" ? 0UL : 1UL
+                    ProtocolVersion = (UInt32)replyVersion
                 }
             });
-            return connect;
-        }
-
-        private static void Run(string adapterPath)
-        {
-            var listener = new TcpListener(IPAddress.Loopback, 0);
-            listener.Start();
-            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            Process process = null;
-            TcpClient backend = null;
-            try
-            {
-                process = Process.Start(new ProcessStartInfo
-                {
-                    FileName = adapterPath,
-                    WorkingDirectory = Path.GetDirectoryName(adapterPath),
-                    UseShellExecute = false,
-                    RedirectStandardInput = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                });
-                Require(process != null, "could not start LuaDebugger.exe");
-
-                WriteDap(process, 1, "initialize", new
-                {
-                    clientID = "issue-13-test",
-                    adapterID = "bg3se"
-                });
-                var initialize = ReadDapUntil(process, msg => IsResponse(msg, 1));
-                Require((bool)initialize["success"], "initialize failed");
-                var pairIdentity =
-                    (string)initialize["body"]["bg3se"]["adapterPairIdentity"];
-                Require(!String.IsNullOrWhiteSpace(pairIdentity),
-                    "initialize did not report an adapter pair identity");
-
-                WriteDap(process, 2, "launch", new
-                {
-                    noDebug = false,
-                    backendHost = "127.0.0.1",
-                    backendPort = port,
-                    dbgOptions = new
-                    {
-                        breakOnError = false,
-                        breakOnGenericError = false,
-                        omitCppFrames = false
-                    }
-                });
-
-                // Probe connection: the adapter classifies the backend, closes
-                // this socket, then opens the real session connection.
-                var probe = AcceptClient(listener);
-                ExpectConnect(probe.GetStream(), 5, pairIdentity);
-
-                backend = AcceptClient(listener);
-                backend.ReceiveTimeout = 5000;
-                backend.SendTimeout = 5000;
-                var backendStream = backend.GetStream();
-                var connect = ReadBackend(backendStream);
-                Require(connect.MsgCase == DebuggerToBackend.MsgOneofCase.Connect,
-                    "first backend request was not connect");
-                Require(connect.Connect.ProtocolVersion == 5, "adapter protocol was not 5");
-                Require(connect.Connect.AdapterPairIdentity == pairIdentity,
-                    "adapter pair identity did not match build identity");
-
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 1,
-                    ReplySeqNo = connect.SeqNo,
-                    ConnectResponse = new BkConnectResponse
-                    {
-                        ProtocolVersion = 5,
-                        BackendPairIdentity = pairIdentity,
-                        Capabilities = 1
-                    }
-                });
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 2,
-                    ContextUpdated = new BkContextUpdated
-                    {
-                        Context = DbgContext.Server,
-                        Status = BkContextUpdated.Types.Status.Loaded
-                    }
-                });
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 3,
-                    ContextUpdated = new BkContextUpdated
-                    {
-                        Context = DbgContext.Client,
-                        Status = BkContextUpdated.Types.Status.Loaded
-                    }
-                });
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 4,
-                    DebuggerReady = new BkDebuggerReady()
-                });
-
-                var startup = new List<JObject>();
-                ReadDapUntil(process, msg => IsEvent(msg, "initialized"), startup);
-                Require(startup.Any(msg => IsResponse(msg, 2)
-                    && (bool)msg["success"]), "launch response was missing");
-                Require((string)startup.First(msg => IsResponse(msg, 2))
-                    ["body"]["bg3se"]["nativeMode"] == "paired",
-                    "launch did not report paired native mode");
-                var lifecycle = startup
-                    .Where(msg => IsEvent(msg, "bg3se/context")
-                        || IsEvent(msg, "bg3se/contextsReady")
-                        || IsEvent(msg, "initialized"))
-                    .Select(msg => (string)msg["event"])
-                    .ToList();
-                Require(lifecycle.SequenceEqual(new[]
-                {
-                    "bg3se/context",
-                    "bg3se/context",
-                    "bg3se/contextsReady",
-                    "initialized"
-                }), "adapter lifecycle ordering was invalid");
-                var contexts = startup.Where(msg => IsEvent(msg, "bg3se/context")).ToList();
-                Require((string)contexts[0]["body"]["context"] == "server"
-                    && (bool)contexts[0]["body"]["initial"], "server initial event was invalid");
-                Require((string)contexts[1]["body"]["context"] == "client"
-                    && (bool)contexts[1]["body"]["initial"], "client initial event was invalid");
-
-                WriteDap(process, 3, "configurationDone", null);
-                Require((bool)ReadDapUntil(process, msg => IsResponse(msg, 3))["success"],
-                    "configurationDone failed");
-
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 5,
-                    BreakpointTriggered = new BkBreakpointTriggered
-                    {
-                        Context = DbgContext.Server,
-                        Reason = BkBreakpointTriggered.Types.Reason.Breakpoint,
-                        Stack =
-                        {
-                            new MsgStackFrame
-                            {
-                                Source = "@test",
-                                Function = "test",
-                                Line = 1,
-                                ScopeFirstLine = 1,
-                                ScopeLastLine = 1
-                            }
-                        }
-                    }
-                });
-                ReadDapUntil(process, msg => IsEvent(msg, "stopped"));
-
-                WriteDap(process, 4, "evaluate", new
-                {
-                    expression = "value",
-                    frameId = 1 << 16,
-                    context = "watch"
-                });
-                var firstEval = ReadBackendUntil(
-                    backendStream, DebuggerToBackend.MsgOneofCase.Evaluate);
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 6,
-                    ReplySeqNo = firstEval.SeqNo,
-                    EvaluateResponse = new BkEvaluateResponse
-                    {
-                        Result = new MsgValue
-                        {
-                            TypeId = MsgValueType.Table,
-                            Variables = new MsgVariablesRef
-                            {
-                                VariableRef = 1,
-                                Frame = -1,
-                                Local = -1
-                            }
-                        }
-                    }
-                });
-                var firstEvalResponse = ReadDapUntil(process, msg => IsResponse(msg, 4));
-                Require((bool)firstEvalResponse["success"], "first evaluate failed");
-                var variableReference = (long)firstEvalResponse["body"]["variablesReference"];
-                Require(variableReference != 0, "evaluate did not create a variable reference");
-
-                WriteDap(process, 5, "evaluate", new
-                {
-                    expression = "pending",
-                    frameId = 1 << 16,
-                    context = "watch"
-                });
-                var pendingEval = ReadBackendUntil(
-                    backendStream, DebuggerToBackend.MsgOneofCase.Evaluate);
-
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 7,
-                    ContextUpdated = new BkContextUpdated
-                    {
-                        Context = DbgContext.Server,
-                        Status = BkContextUpdated.Types.Status.Unloaded
-                    }
-                });
-                var unloadMessages = new List<JObject>();
-                var staleResponse = ReadDapUntil(process, msg => IsResponse(msg, 5), unloadMessages);
-                Require(!(bool)staleResponse["success"]
-                    && (string)staleResponse["message"] == "stale_context",
-                    "pending evaluation was not canceled as stale_context");
-                Require(unloadMessages.Any(msg => IsEvent(msg, "bg3se/context")
-                    && (string)msg["body"]["context"] == "server"
-                    && (string)msg["body"]["state"] == "unloaded"
-                    && !(bool)msg["body"]["initial"]), "server unload event was missing");
-
-                WriteDap(process, 6, "variables", new
-                {
-                    variablesReference = variableReference
-                });
-                var staleVariables = ReadDapUntil(process, msg => IsResponse(msg, 6));
-                Require(!(bool)staleVariables["success"],
-                    "stale variable reference survived context unload");
-
-                WriteBackend(backendStream, new BackendToDebugger
-                {
-                    SeqNo = 8,
-                    ReplySeqNo = pendingEval.SeqNo,
-                    EvaluateResponse = new BkEvaluateResponse
-                    {
-                        Result = new MsgValue { TypeId = MsgValueType.String, Stringval = "late" }
-                    }
-                });
-                WriteDap(process, 7, "threads", null);
-                var threads = ReadDapUntil(process, msg => IsResponse(msg, 7));
-                Require((bool)threads["success"], "late response broke adapter state");
-
-                backend.Close();
-                backend = null;
-                var terminationCount = 0;
-                while (!process.HasExited)
-                {
-                    var message = ReadDap(process);
-                    if (message == null)
-                    {
-                        break;
-                    }
-                    if (IsEvent(message, "terminated"))
-                    {
-                        terminationCount++;
-                    }
-                }
-                Require(process.WaitForExit(5000), "adapter did not exit after backend EOF");
-                Require(terminationCount == 1, "unexpected backend EOF did not terminate exactly once");
-                Require(process.ExitCode == 0, "adapter process exited with an error");
-            }
-            finally
-            {
-                backend?.Close();
-                listener.Stop();
-                if (process != null)
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill();
-                        process.WaitForExit();
-                    }
-                    process.Dispose();
-                }
-            }
         }
 
         /// <summary>
@@ -489,7 +215,7 @@ namespace NSE.DebuggerFrontend.Tests
         /// without a pair identity, so the adapter reconnects at v4 and runs
         /// in stock native mode.
         /// </summary>
-        private static void RunStock(string adapterPath)
+        private static void Run(string adapterPath)
         {
             var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
@@ -517,10 +243,6 @@ namespace NSE.DebuggerFrontend.Tests
                 });
                 var initialize = ReadDapUntil(process, msg => IsResponse(msg, 1));
                 Require((bool)initialize["success"], "initialize failed");
-                var pairIdentity =
-                    (string)initialize["body"]["bg3se"]["adapterPairIdentity"];
-                Require(!String.IsNullOrWhiteSpace(pairIdentity),
-                    "initialize did not report an adapter pair identity");
 
                 WriteDap(process, 2, "launch", new
                 {
@@ -535,17 +257,10 @@ namespace NSE.DebuggerFrontend.Tests
                     }
                 });
 
-                // Probe: the adapter always offers the pair protocol first; a
-                // stock backend answers with its own version and no identity.
-                var probe = AcceptClient(listener);
-                ExpectConnect(probe.GetStream(), 5, pairIdentity,
-                    replyVersion: 4, replyIdentity: null);
-
-                // Real session connection at v4.
+                // Single stock connection at v4.
                 backend = AcceptClient(listener);
                 var backendStream = backend.GetStream();
-                ExpectConnect(backendStream, 4, "");
-
+                ExpectConnect(backendStream, 4, 4);
                 // Stock greets with context states; mirror that.
                 WriteBackend(backendStream, new BackendToDebugger
                 {
@@ -570,12 +285,10 @@ namespace NSE.DebuggerFrontend.Tests
                 Require((bool)launchResponse["success"],
                     "stock launch response was not successful");
                 var bg3se = launchResponse["body"]["bg3se"];
-                Require((string)bg3se["nativeMode"] == "stock",
-                    "launch did not report stock native mode");
                 Require((int)bg3se["backendProtocolVersion"] == 4,
-                    "launch did not report the stock backend protocol version");
+                    "launch did not report the backend protocol version");
                 Require(IsEvent(ReadDapUntil(process, msg => IsEvent(msg, "initialized")),
-                    "initialized"), "initialized event was missing in stock mode");
+                    "initialized"), "initialized event was missing");
 
                 WriteDap(process, 3, "configurationDone", null);
                 Require((bool)ReadDapUntil(process, msg => IsResponse(msg, 3))["success"],
@@ -672,13 +385,87 @@ namespace NSE.DebuggerFrontend.Tests
             }
         }
 
+        /// <summary>
+        /// Wrong-DLL scenario: a backend answering with an unexpected protocol
+        /// version must fail the launch closed with protocol_mismatch.
+        /// </summary>
+        private static void RunProtocolMismatch(string adapterPath)
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Process process = null;
+            TcpClient backend = null;
+            try
+            {
+                process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = adapterPath,
+                    WorkingDirectory = Path.GetDirectoryName(adapterPath),
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                });
+                Require(process != null, "could not start LuaDebugger.exe");
+
+                WriteDap(process, 1, "initialize", new
+                {
+                    clientID = "mismatch-test",
+                    adapterID = "bg3se"
+                });
+                Require((bool)ReadDapUntil(process, msg => IsResponse(msg, 1))["success"],
+                    "initialize failed");
+
+                WriteDap(process, 2, "launch", new
+                {
+                    noDebug = false,
+                    backendHost = "127.0.0.1",
+                    backendPort = port
+                });
+
+                backend = AcceptClient(listener);
+                var connect = ReadBackend(backend.GetStream());
+                Require(connect.MsgCase == DebuggerToBackend.MsgOneofCase.Connect,
+                    "backend request was not connect");
+                WriteBackend(backend.GetStream(), new BackendToDebugger
+                {
+                    SeqNo = 1,
+                    ReplySeqNo = connect.SeqNo,
+                    ConnectResponse = new BkConnectResponse { ProtocolVersion = 3 }
+                });
+
+                var failure = ReadDapUntil(process, msg => IsResponse(msg, 2));
+                Require(!(bool)failure["success"],
+                    "launch against wrong backend version did not fail");
+                Require((string)failure["body"]["bg3se"]["mismatchCode"] == "protocol_mismatch",
+                    "launch failure did not report protocol_mismatch");
+                Require(process.WaitForExit(5000),
+                    "adapter did not exit after incompatible backend");
+            }
+            finally
+            {
+                listener.Stop();
+                if (process != null)
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill();
+                        process.WaitForExit();
+                    }
+                    process.Dispose();
+                }
+            }
+        }
+
         private static int Main(string[] args)
         {
             try
             {
                 Require(args.Length == 1, "usage: AdapterProcessTests <LuaDebugger.exe>");
                 Run(Path.GetFullPath(args[0]));
-                RunStock(Path.GetFullPath(args[0]));
+                RunProtocolMismatch(Path.GetFullPath(args[0]));
                 Console.WriteLine("LuaDebugger process tests passed");
                 return 0;
             }
@@ -691,6 +478,7 @@ namespace NSE.DebuggerFrontend.Tests
         }
     }
 }
+
 
 
 

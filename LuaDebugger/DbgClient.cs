@@ -218,15 +218,13 @@ namespace NSE.DebuggerFrontend
             }
         }
 
-        public void SendConnectRequest(UInt32 protocolVersion, string pairIdentity, UInt64 requiredCapabilities)
+        public void SendConnectRequest(UInt32 protocolVersion)
         {
             var msg = new DebuggerToBackend
             {
                 Connect = new DbgConnectRequest
                 {
-                    ProtocolVersion = protocolVersion,
-                    AdapterPairIdentity = pairIdentity,
-                    RequiredCapabilities = requiredCapabilities
+                    ProtocolVersion = protocolVersion
                 }
             };
             PendingConnectSeq = Send(msg, seq => PendingConnectSeq = seq);

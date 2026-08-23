@@ -13,6 +13,8 @@ enum StatusCode {
   EVAL_ENGINE_NOT_READY = 5;
   EVAL_FAILED = 6;
   NO_SUCH_FILE = 7;
+  // Adapter-local: pending work failed during session/context teardown.
+  // Never sent by stock backends; consumed only inside the adapter.
   STALE_CONTEXT = 8;
 }
 
@@ -87,14 +89,10 @@ message MsgStackFrame {
 
 message DbgConnectRequest {
   uint32 protocol_version = 1;
-  string adapter_pair_identity = 2;
-  uint64 required_capabilities = 3;
 }
 
 message BkConnectResponse {
   uint32 protocol_version = 1;
-  string backend_pair_identity = 2;
-  uint64 capabilities = 3;
 }
 
 message DbgUpdateSettings {

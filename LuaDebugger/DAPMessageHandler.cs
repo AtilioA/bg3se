@@ -79,10 +79,7 @@ namespace NSE.DebuggerFrontend
         }
 
         // DBG protocol version (game/editor backend to debugger frontend communication)
-        private const UInt32 DBGProtocolVersion = 5;
-        private const UInt32 StockProtocolVersion = 4;
-        private const int ProbeTimeoutMs = 3000;
-        private const UInt64 RequiredCapabilities = 1UL << 0;
+        private const UInt32 DBGProtocolVersion = 4;
 
         // DAP thread ID for Lua server context
         private const int ServerThreadId = 1;
@@ -112,8 +109,6 @@ namespace NSE.DebuggerFrontend
         private ExpressionEvaluator Evaluator;
         private DAPRequest PendingLaunchRequest;
         private bool PairCompatible;
-        private bool StockNativeMode;
-        private string NativeMode;
         private string BackendHost;
         private int BackendPort;
         private BkConnectResponse BackendHandshake;
@@ -455,7 +450,6 @@ namespace NSE.DebuggerFrontend
         {
             DAPRequest pendingLaunch;
             string mismatchCode;
-            DAPBG3SEHandshake details;
             lock (HandshakeLock)
             {
                 if (PendingLaunchRequest == null)
@@ -463,82 +457,42 @@ namespace NSE.DebuggerFrontend
                     return;
                 }
                 BackendHandshake = response;
-                mismatchCode = StockNativeMode
-                    ? GetStockMismatchCode(response)
-                    : GetPairMismatchCode(response);
-                PairCompatible = mismatchCode == null && !StockNativeMode;
+                mismatchCode = GetMismatchCode(response);
+                PairCompatible = mismatchCode == null;
                 pendingLaunch = PendingLaunchRequest;
                 PendingLaunchRequest = null;
-                details = MakeLaunchHandshakeDetails(response);
-                details.mismatchCode = mismatchCode;
             }
 
             if (mismatchCode != null)
             {
-                Stream.SendReply(pendingLaunch, $"BG3SE debugger pair is incompatible: {mismatchCode}",
-                    new DAPLaunchResponse { bg3se = details });
+                Stream.SendReply(pendingLaunch,
+                    $"BG3SE debugger backend is incompatible: {mismatchCode}",
+                    new DAPLaunchResponse
+                    {
+                        bg3se = new DAPBG3SEHandshake
+                        {
+                            backendProtocolVersion = response?.ProtocolVersion,
+                            mismatchCode = mismatchCode
+                        }
+                    });
                 CloseSession(false, new InvalidDataException(mismatchCode));
             }
             else
             {
-                Stream.SendReply(pendingLaunch, new DAPLaunchResponse { bg3se = details });
-                if (StockNativeMode)
+                Stream.SendReply(pendingLaunch, new DAPLaunchResponse
                 {
-                    CompleteBackendReadyStock();
-                }
+                    bg3se = new DAPBG3SEHandshake
+                    {
+                        backendProtocolVersion = response.ProtocolVersion
+                    }
+                });
+                CompleteBackendReady();
             }
         }
 
-        private DAPBG3SEHandshake MakeHandshakeDetails(BkConnectResponse response = null)
+        private string GetMismatchCode(BkConnectResponse response)
         {
-            return new DAPBG3SEHandshake
-            {
-                adapterPairIdentity = DebuggerPairIdentity.Value,
-                backendPairIdentity = response?.BackendPairIdentity,
-                adapterProtocolVersion = StockNativeMode ? StockProtocolVersion : DBGProtocolVersion,
-                backendProtocolVersion = response?.ProtocolVersion,
-                requiredCapabilities = RequiredCapabilities,
-                availableCapabilities = response?.Capabilities,
-                nativeMode = NativeMode
-            };
-        }
-
-        private DAPBG3SEHandshake MakeLaunchHandshakeDetails(BkConnectResponse response = null)
-        {
-            var details = MakeHandshakeDetails(response);
-            if (response == null)
-            {
-                details.backendPairIdentity = null;
-                details.backendProtocolVersion = null;
-                details.availableCapabilities = null;
-            }
-            return details;
-        }
-
-        private string GetPairMismatchCode(BkConnectResponse response)
-        {
-            if (response == null || response.ProtocolVersion == 0 || String.IsNullOrWhiteSpace(response.BackendPairIdentity))
-            {
-                return "handshake_missing";
-            }
-            if (response.ProtocolVersion != DBGProtocolVersion)
-            {
-                return "protocol_mismatch";
-            }
-            if (response.BackendPairIdentity != DebuggerPairIdentity.Value)
-            {
-                return "build_identity_mismatch";
-            }
-            if ((response.Capabilities & RequiredCapabilities) != RequiredCapabilities)
-            {
-                return "capabilities_incompatible";
-            }
-            return null;
-        }
-
-        private string GetStockMismatchCode(BkConnectResponse response)
-        {
-            if (response == null || response.ProtocolVersion != StockProtocolVersion)
+            if (response == null || response.ProtocolVersion != DBGProtocolVersion)
             {
                 return "protocol_mismatch";
             }
@@ -559,10 +513,13 @@ namespace NSE.DebuggerFrontend
                 backendHandshake = BackendHandshake;
                 PendingLaunchRequest = null;
             }
-            var details = MakeLaunchHandshakeDetails(backendHandshake);
-            details.mismatchCode = "handshake_missing";
-            Stream.SendReply(pendingLaunch, "BG3SE debugger handshake is missing",
-                new DAPLaunchResponse { bg3se = details });
+            var version = backendHandshake?.ProtocolVersion;
+            Stream.SendReply(pendingLaunch,
+                $"BG3SE debugger handshake failed (backend protocol version: {version})",
+                new DAPLaunchResponse
+                {
+                    bg3se = new DAPBG3SEHandshake { backendProtocolVersion = version }
+                });
             LogError(error.ToString());
             return true;
         }
@@ -824,44 +781,7 @@ namespace NSE.DebuggerFrontend
             Evaluator.OnResultsReceived(seq, msg);
         }
 
-        private void OnDebuggerReady(BkDebuggerReady msg)
-        {
-            bool lifecycleMissing;
-            lock (HandshakeLock)
-            {
-                lifecycleMissing = PairCompatible && PendingLaunchRequest == null && !ContextsReady;
-                if (!PairCompatible || PendingLaunchRequest != null || lifecycleMissing)
-                {
-                    if (!lifecycleMissing)
-                    {
-                        return;
-                    }
-                }
-            }
-
-            if (lifecycleMissing)
-            {
-                CloseSession(false, new InvalidDataException());
-                return;
-            }
-
-            CompleteBackendReady();
-        }
-
         private void CompleteBackendReady()
-        {
-            lock (HandshakeLock)
-            {
-                if (InitializedSent || !ContextsReady)
-                {
-                    return;
-                }
-                InitializedSent = true;
-            }
-            SendInitialized("Debugger backend ready\r\n");
-        }
-
-        private void CompleteBackendReadyStock()
         {
             lock (HandshakeLock)
             {
@@ -871,7 +791,7 @@ namespace NSE.DebuggerFrontend
                 }
                 InitializedSent = true;
             }
-            SendInitialized("Debugger backend ready (stock native mode)\r\n");
+            SendInitialized("Debugger backend ready\r\n");
         }
 
         private void SendInitialized(string notice)
@@ -905,8 +825,7 @@ namespace NSE.DebuggerFrontend
                 supportsConfigurationDoneRequest = true,
                 supportsEvaluateForHovers = true,
                 supportsModulesRequest = true,
-                supportsLoadedSourcesRequest = true,
-                bg3se = MakeHandshakeDetails()
+                supportsLoadedSourcesRequest = true
             };
             Stream.SendReply(request, reply);
         }
@@ -933,53 +852,6 @@ namespace NSE.DebuggerFrontend
             DbgThread.Start();
         }
 
-        /// <summary>
-        /// One-shot backend probe used to classify the running extender build.
-        /// A paired (custom) backend accepts DBGProtocolVersion and returns its
-        /// identity. A stock backend replies with StockProtocolVersion and then
-        /// disconnects, so the echoed version identifies the mode without any
-        /// timeout race.
-        /// </summary>
-        private BkConnectResponse ProbeBackend(string host, int port, UInt32 protocolVersion, string pairIdentity, UInt64 requiredCapabilities)
-        {
-            var client = new AsyncProtobufClient(host, port);
-            var done = new TaskCompletionSource<BkConnectResponse>();
-            var cli = new DebuggerClient(client)
-            {
-                OnBackendConnected = response => done.TrySetResult(response)
-            };
-            var thread = new Thread(() =>
-            {
-                try
-                {
-                    client.RunLoop();
-                    done.TrySetResult(null);
-                }
-                catch (Exception)
-                {
-                    done.TrySetResult(null);
-                }
-            })
-            {
-                IsBackground = true,
-                Name = "Backend probe"
-            };
-            thread.Start();
-            try
-            {
-                cli.SendConnectRequest(protocolVersion, pairIdentity, requiredCapabilities);
-                if (done.Task.Wait(ProbeTimeoutMs))
-                {
-                    return done.Task.Result;
-                }
-                return null;
-            }
-            finally
-            {
-                client.Close();
-            }
-        }
-
         private void HandleLaunchRequest(DAPRequest request, DAPLaunchRequest launch)
         {
             Config = launch.dbgOptions;
@@ -1002,39 +874,6 @@ namespace NSE.DebuggerFrontend
             BackendHost = launch.backendHost;
             BackendPort = launch.backendPort;
 
-            // Classify the backend: paired custom build (v5) or stock build (v4).
-            BkConnectResponse pairedResponse;
-            try
-            {
-                pairedResponse = ProbeBackend(launch.backendHost, launch.backendPort,
-                    DBGProtocolVersion, DebuggerPairIdentity.Value, RequiredCapabilities);
-            }
-            catch (SocketException e)
-            {
-                throw new RequestFailedException("Could not connect to Lua debugger backend: " + e.Message);
-            }
-
-            bool usePair = pairedResponse != null
-                && pairedResponse.ProtocolVersion == DBGProtocolVersion
-                && !String.IsNullOrWhiteSpace(pairedResponse.BackendPairIdentity);
-            if (!usePair && pairedResponse != null
-                && pairedResponse.ProtocolVersion != StockProtocolVersion)
-            {
-                // A live backend answered with an unknown protocol; do not guess.
-                throw new RequestFailedException(
-                    $"Lua debugger backend reported unsupported protocol version {pairedResponse.ProtocolVersion}");
-            }
-            if (usePair)
-            {
-                var mismatch = GetPairMismatchCode(pairedResponse);
-                if (mismatch != null)
-                {
-                    throw new RequestFailedException($"BG3SE debugger pair is incompatible: {mismatch}");
-                }
-            }
-            StockNativeMode = !usePair;
-            NativeMode = usePair ? "paired" : "stock";
-
             try
             {
                 DbgClient = new AsyncProtobufClient(launch.backendHost, launch.backendPort);
@@ -1053,7 +892,6 @@ namespace NSE.DebuggerFrontend
                 OnModInfo = msg => PostOnState(() => OnModInfo(msg)),
                 OnDebugOutput = msg => PostOnState(() => OnDebugOutput(msg)),
                 OnResults = (seq, msg) => PostOnState(() => OnResults(seq, msg)),
-                OnDebuggerReady = msg => PostOnState(() => OnDebuggerReady(msg)),
                 OnSourceResponse = (seq, msg) => PostOnState(() => OnSourceResponse(seq, msg)),
                 OnGetVariablesFinished = (seq, msg) => PostOnState(() => Evaluator.OnGetVariablesFinished(seq, msg))
             };
@@ -1072,15 +910,7 @@ namespace NSE.DebuggerFrontend
 
             try
             {
-                if (!StockNativeMode)
-                {
-                    DbgCli.SendConnectRequest(DBGProtocolVersion,
-                        DebuggerPairIdentity.Value, RequiredCapabilities);
-                }
-                else
-                {
-                    DbgCli.SendConnectRequest(StockProtocolVersion, "", 0);
-                }
+                DbgCli.SendConnectRequest(DBGProtocolVersion);
                 StartBackendReader();
             }
             catch (Exception e)
@@ -1524,4 +1354,6 @@ namespace NSE.DebuggerFrontend
         }
     }
 }
+
+
 

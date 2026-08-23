@@ -258,13 +258,7 @@ namespace NSE.DebuggerFrontend
 
     public class DAPBG3SEHandshake
     {
-        public string adapterPairIdentity { get; set; }
-        public string backendPairIdentity { get; set; }
-        public UInt32? adapterProtocolVersion { get; set; }
         public UInt32? backendProtocolVersion { get; set; }
-        public UInt64? requiredCapabilities { get; set; }
-        public UInt64? availableCapabilities { get; set; }
-        public string nativeMode { get; set; }
         public string mismatchCode { get; set; }
     }
 

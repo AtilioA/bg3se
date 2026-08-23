@@ -86,7 +86,6 @@
     <Compile Include="DAPStream.cs" />
     <Compile Include="DAPUtils.cs" />
     <Compile Include="DbgClient.cs" />
-    <Compile Include="DebuggerPairIdentity.g.cs" />
     <Compile Include="DbgProtocol.cs" />
     <Compile Include="Evaluator.cs" />
     <Compile Include="Program.cs" />
@@ -114,3 +113,4 @@
     <PreBuildEvent>$(SolutionDir)\External\protobuf\tools\protobuf\protoc.exe --proto_path=$(ProjectDir) --csharp_out=$(ProjectDir) DbgProtocol.proto</PreBuildEvent>
   </PropertyGroup>
 </Project>
+
