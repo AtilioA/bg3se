@@ -365,22 +365,20 @@ namespace NSE.DebuggerFrontend.Tests
                     && evalResult != null && evalResult.Contains("2"),
                     $"stock evaluate returned unexpected result: {evalResult}");
 
-                backend.Close();
-                backend = null;
-                while (!process.HasExited)
+                process.StandardInput.Close();
+                var reset = false;
+                try
                 {
-                    var message = ReadDap(process);
-                    if (message == null)
-                    {
-                        break;
-                    }
-                    if (IsEvent(message, "terminated"))
-                    {
-                        break;
-                    }
+                    backendStream.ReadByte();
                 }
-                Require(process.WaitForExit(5000), "adapter did not exit after backend EOF");
-                Require(process.ExitCode == 0, "adapter process exited with an error");
+                catch (IOException error) when (
+                    error.InnerException is SocketException socketError
+                    && socketError.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    reset = true;
+                }
+                Require(reset, "adapter stdin EOF closed the backend without a TCP reset");
+                Require(process.WaitForExit(5000), "adapter did not exit after stdin EOF");
             }
             finally
             {

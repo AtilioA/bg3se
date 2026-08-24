@@ -52,6 +52,9 @@ namespace NSE.DebuggerFrontend
 
             Socket = new TcpClient();
             Socket.Connect(host, port);
+            // Stock spins forever on orderly FIN (recv == 0). Configure the
+            // socket up front so even forced process termination sends RST.
+            Socket.LingerState = new LingerOption(true, 0);
         }
 
         public void RunLoop()
@@ -132,19 +135,7 @@ namespace NSE.DebuggerFrontend
                 Closed = true;
                 try
                 {
-                    // Reset instead of graceful close: stock backend
-                    // MessageLoop treats orderly FIN (recv == 0) as
-                    // "no data" and spins forever, wedging the debugger
-                    // listener until the game restarts. A RST surfaces as
-                    // a recv error there, which exits the loop cleanly.
-                    Socket.LingerState = new System.Net.Sockets.LingerOption(true, 0);
-                }
-                catch (Exception)
-                {
-                }
-                try
-                {
-                    Socket.Close();
+                    Socket.Client.Close(0);
                 }
                 catch (Exception)
                 {
