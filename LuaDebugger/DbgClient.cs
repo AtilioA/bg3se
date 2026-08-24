@@ -132,6 +132,18 @@ namespace NSE.DebuggerFrontend
                 Closed = true;
                 try
                 {
+                    // Reset instead of graceful close: stock backend
+                    // MessageLoop treats orderly FIN (recv == 0) as
+                    // "no data" and spins forever, wedging the debugger
+                    // listener until the game restarts. A RST surfaces as
+                    // a recv error there, which exits the loop cleanly.
+                    Socket.LingerState = new System.Net.Sockets.LingerOption(true, 0);
+                }
+                catch (Exception)
+                {
+                }
+                try
+                {
                     Socket.Close();
                 }
                 catch (Exception)
