@@ -369,19 +369,20 @@ namespace NSE.DebuggerFrontend
             }
             LogMessage(message);
 
-            if (message.SeqNo != IncomingSeq)
-            {
-                throw new InvalidDataException($"NSE sequence number mismatch; got {message.SeqNo} expected {IncomingSeq}");
-            }
-
-            IncomingSeq++;
+            // Stock backends number notifications non-deterministically
+            // (local logging advances their outbound counter before reset),
+            // so inbound sequence values are recorded, never enforced.
+            // Request/response correlation uses ReplySeqNo per message type.
+            IncomingSeq = message.SeqNo;
 
             switch (message.MsgCase)
             {
                 case BackendToDebugger.MsgOneofCase.ConnectResponse:
-                    if (PendingConnectSeq == 0 || message.ReplySeqNo != PendingConnectSeq)
+                    // Stock backends leave reply_seq_no unset on connect
+                    // responses, so only require that a connect is pending.
+                    if (PendingConnectSeq == 0)
                     {
-                        throw new InvalidDataException($"NSE connect response mismatch; got reply {message.ReplySeqNo} expected {PendingConnectSeq}");
+                        throw new InvalidDataException("NSE connect response received without a pending connect");
                     }
                     PendingConnectSeq = 0;
                     OnBackendConnected(message.ConnectResponse);

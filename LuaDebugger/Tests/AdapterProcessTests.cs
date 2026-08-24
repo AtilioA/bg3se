@@ -75,7 +75,8 @@ namespace NSE.DebuggerFrontend.Tests
                     break;
                 }
                 var separator = line.IndexOf(':');
-                Require(separator > 0, "malformed DAP header");
+                Require(separator > 0, "malformed DAP header; offending line: " +
+                    BitConverter.ToString(Encoding.UTF8.GetBytes(line)));
                 if (line.Substring(0, separator).Equals(
                     "Content-Length", StringComparison.OrdinalIgnoreCase))
                 {
@@ -261,10 +262,21 @@ namespace NSE.DebuggerFrontend.Tests
                 backend = AcceptClient(listener);
                 var backendStream = backend.GetStream();
                 ExpectConnect(backendStream, 4, 4);
+                // Real stock leads its stream with a debug-output echo of the
+                // connect log line, numbered from an already-advanced counter.
+                WriteBackend(backendStream, new BackendToDebugger
+                {
+                    SeqNo = 3,
+                    DebugOutput = new BkDebugOutput
+                    {
+                        Message = "Connected to Lua debugger frontend",
+                        Severity = BkDebugOutput.Types.Severity.LevelInfo
+                    }
+                });
                 // Stock greets with context states; mirror that.
                 WriteBackend(backendStream, new BackendToDebugger
                 {
-                    SeqNo = 2,
+                    SeqNo = 4,
                     ContextUpdated = new BkContextUpdated
                     {
                         Context = DbgContext.Server,
@@ -273,7 +285,7 @@ namespace NSE.DebuggerFrontend.Tests
                 });
                 WriteBackend(backendStream, new BackendToDebugger
                 {
-                    SeqNo = 3,
+                    SeqNo = 5,
                     ContextUpdated = new BkContextUpdated
                     {
                         Context = DbgContext.Client,
@@ -303,13 +315,13 @@ namespace NSE.DebuggerFrontend.Tests
                     "adapter did not request a backend pause");
                 WriteBackend(backendStream, new BackendToDebugger
                 {
-                    SeqNo = 4,
+                    SeqNo = 6,
                     ReplySeqNo = pauseReq.SeqNo,
                     Results = new BkResult { StatusCode = StatusCode.Success }
                 });
                 WriteBackend(backendStream, new BackendToDebugger
                 {
-                    SeqNo = 5,
+                    SeqNo = 7,
                     BreakpointTriggered = new BkBreakpointTriggered
                     {
                         Context = DbgContext.Server,
@@ -340,7 +352,7 @@ namespace NSE.DebuggerFrontend.Tests
                 Require(eval.Evaluate.Expression == "1 + 1", "eval expression was mangled");
                 WriteBackend(backendStream, new BackendToDebugger
                 {
-                    SeqNo = 6,
+                    SeqNo = 8,
                     ReplySeqNo = eval.SeqNo,
                     EvaluateResponse = new BkEvaluateResponse
                     {
